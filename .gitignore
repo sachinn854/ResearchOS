@@ -79,7 +79,6 @@ minio_data/
 *.ckpt
 *.safetensors
 *.gguf
-models/
 model_cache/
 .cache/huggingface/
 sentence_transformers/
