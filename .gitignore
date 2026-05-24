@@ -126,6 +126,13 @@ exports/
 reports/
 tmp/
 temp/
+data/
+
+# =========================
+# Screenshots & temp files
+# =========================
+*.png
+scripts/sample_rag.txt
 
 # =========================
 # Jupyter

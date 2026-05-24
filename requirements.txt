@@ -30,6 +30,10 @@ langchain-core
 langchain-openai
 langchain-anthropic
 langchain-community
+langchain-text-splitters
+langchain-experimental
+langchain-huggingface
+langchain-groq
 
 # -------------------------------------------------------------
 # Embeddings & Reranking
@@ -78,12 +82,16 @@ pillow
 # -------------------------------------------------------------
 httpx
 arxiv
+tavily-python
 
 # -------------------------------------------------------------
 # Evaluation
 # -------------------------------------------------------------
 ragas
 deepeval
+datasets
+pytest
+pytest-asyncio
 
 # -------------------------------------------------------------
 # Observability & Tracing
@@ -115,6 +123,7 @@ structlog
 tiktoken
 numpy
 scipy
+scikit-learn
 tqdm
 rich
 pyyaml
