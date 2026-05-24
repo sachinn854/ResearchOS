@@ -11,6 +11,7 @@ import asyncio
 import os
 
 import arxiv
+import httpx
 
 from backend.db.postgres import AsyncSessionLocal
 from backend.db.qdrant_client import init_collection
@@ -23,7 +24,7 @@ def download_papers(query: str, max_results: int) -> list[dict]:
     """Search arXiv and download PDFs. Returns list of {path, title}."""
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-    client = arxiv.Client()
+    client = arxiv.Client(delay_seconds=5, num_retries=5)
     search = arxiv.Search(
         query=query,
         max_results=max_results,
@@ -40,7 +41,9 @@ def download_papers(query: str, max_results: int) -> list[dict]:
             print(f"  [skip] already downloaded: {paper.title}")
         else:
             print(f"  [download] {paper.title}")
-            paper.download_pdf(filename=pdf_path)
+            response = httpx.get(paper.pdf_url, follow_redirects=True, timeout=60)
+            with open(pdf_path, "wb") as f:
+                f.write(response.content)
 
         downloaded.append({"path": pdf_path, "title": paper.title})
 
