@@ -17,6 +17,7 @@ class QueryRequest(BaseModel):
     query: str = Field(description="Research question to answer")
     top_k: int = Field(default=5, description="Number of chunks to retrieve from the vector store")
     domain: str | None = Field(default=None, description="Filter retrieval to a specific domain")
+    session_id: str | None = Field(default=None, description="Session ID for conversation memory")
 
 
 class SourceItem(BaseModel):
@@ -30,3 +31,16 @@ class QueryResponse(BaseModel):
     answer: str
     chunks_used: int
     sources: list[SourceItem]
+
+
+class AsyncIngestResponse(BaseModel):
+    task_id: str
+    status: str
+    message: str
+
+
+class TaskStatusResponse(BaseModel):
+    task_id: str
+    status: str
+    result: dict | None = None
+    error: str | None = None

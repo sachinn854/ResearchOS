@@ -35,6 +35,14 @@ class Settings(BaseSettings):
         description="Output dimension of the embedding model — must match Qdrant collection size"
     )
 
+    # Langfuse (optional — leave empty to disable tracing)
+    langfuse_public_key: str | None = Field(default=None, description="Langfuse public key for LLM tracing")
+    langfuse_secret_key: str | None = Field(default=None, description="Langfuse secret key")
+    langfuse_host: str = Field(default="https://cloud.langfuse.com", description="Langfuse host URL")
+
+    # Web Search (optional — Tavily for Adaptive KB)
+    tavily_api_key: str | None = Field(default=None, description="Tavily API key for web search fallback")
+
     # App
     app_env: str = Field(
         default="development",
