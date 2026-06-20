@@ -2,9 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps for PyMuPDF, psycopg2
+# gcc + libpq-dev needed for any native extensions at install time
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev libmupdf-dev && \
+    gcc libpq-dev && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

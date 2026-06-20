@@ -5,6 +5,11 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+
+# Baked into the Next.js bundle at build time — must be the public URL
+ARG NEXT_PUBLIC_API_URL=http://localhost:8001
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
 RUN npm run build
 
 FROM node:20-alpine AS runner
