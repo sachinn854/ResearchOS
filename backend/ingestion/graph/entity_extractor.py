@@ -1,13 +1,10 @@
 import json
 import logging
 
-from groq import Groq
-
 from backend.core.config import settings
+from backend.core.llm import llm as _llm, provider_kwargs
 
 log = logging.getLogger("researchos.ingestion.graph")
-
-_groq = Groq(api_key=settings.groq_api_key)
 
 _SYSTEM = """Extract key technical entities from the text.
 Return a JSON object: {"entities": ["entity1", "entity2", ...]}
@@ -20,14 +17,9 @@ Return ONLY the JSON object."""
 
 
 def extract_entities(text: str) -> list[str]:
-    """Extract technical entities from a chunk of text using the LLM.
-
-    Returns a list of lowercase entity strings (max 10).
-    Returns [] on any failure so the pipeline is never blocked.
-    """
     try:
-        response = _groq.chat.completions.create(
-            model=settings.groq_model,
+        response = _llm.chat.completions.create(**provider_kwargs(),
+            model=settings.llm_model,
             messages=[
                 {"role": "system", "content": _SYSTEM},
                 {"role": "user", "content": text[:800]},

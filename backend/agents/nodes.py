@@ -2,12 +2,11 @@ import json
 import logging
 from collections.abc import Generator
 
-from groq import Groq
-
 log = logging.getLogger("researchos.agent")
 
 from backend.agents.state import AgentState
 from backend.core.config import settings
+from backend.core.llm import llm as _llm, provider_kwargs
 from backend.prompts.report import build_report_prompt
 from backend.retrieval.context_assembler import ContextAssembler
 from backend.retrieval.hybrid_retriever import HybridRetriever
@@ -15,7 +14,6 @@ from backend.retrieval.web_searcher import search_web
 
 _retriever = HybridRetriever()
 _assembler = ContextAssembler()
-_groq = Groq(api_key=settings.groq_api_key)
 
 # Langfuse tracing — enabled only when keys are configured
 _langfuse = None
@@ -51,8 +49,8 @@ Rules:
 - Return ONLY valid JSON"""
 
     try:
-        response = _groq.chat.completions.create(
-            model=settings.groq_model,
+        response = _llm.chat.completions.create(**provider_kwargs(),
+            model=settings.llm_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=200,
@@ -83,7 +81,7 @@ async def retriever_node(state: AgentState) -> dict:
         merged: list = []
 
         for sq in sub_queries:
-            sq_chunks = await _retriever.retrieve(
+            sq_chunks, _ = await _retriever.retrieve(
                 sq, db=state["db"], top_k=5, domain=state["domain"]
             )
             for c in sq_chunks:
@@ -92,16 +90,15 @@ async def retriever_node(state: AgentState) -> dict:
                     seen_keys.add(key)
                     merged.append(c)
 
-        # Re-score merged chunks against original query and take top 5
-        merged = _assembler.rerank_chunks(state["query"], merged, top_k=5) if hasattr(_assembler, "rerank_chunks") else merged[:5]
+        merged = sorted(merged, key=lambda c: c.score, reverse=True)[:5]
         log.info("[retriever] merged %d unique chunks from sub-queries", len(merged))
         return {"chunks": merged}
 
     log.info("[retriever] running hybrid retrieval...")
-    chunks = await _retriever.retrieve(
+    chunks, best_dense_score = await _retriever.retrieve(
         state["query"], db=state["db"], top_k=5, domain=state["domain"]
     )
-    log.info("[retriever] found %d chunks", len(chunks))
+    log.info("[retriever] found %d chunks | best_dense=%.3f", len(chunks), best_dense_score)
     return {"chunks": chunks}
 
 
@@ -184,8 +181,8 @@ Retrieved chunks:
 Reply with JSON only — no explanation:
 {{"relevant": true}} or {{"relevant": false}}"""
 
-    response = _groq.chat.completions.create(
-        model=settings.groq_model,
+    response = _llm.chat.completions.create(**provider_kwargs(),
+        model=settings.llm_model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )
@@ -208,13 +205,14 @@ def generator_node(state: AgentState) -> dict:
         context=context,
         question=state["query"],
         conversation_history=state.get("conversation_history"),
+        domain=state.get("domain"),
     )
 
     trace = _langfuse.trace(name="rag-query", input={"query": state["query"]}) if _langfuse else None
     span = trace.span(name="generator", input={"chunks": len(state["chunks"])}) if trace else None
 
-    response = _groq.chat.completions.create(
-        model=settings.groq_model,
+    response = _llm.chat.completions.create(**provider_kwargs(),
+        model=settings.llm_model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
     )
@@ -259,12 +257,14 @@ def stream_generator_node(state: AgentState) -> Generator[str, None, dict]:
         context=context,
         question=state["query"],
         conversation_history=state.get("conversation_history"),
+        domain=state.get("domain"),
     )
 
-    stream = _groq.chat.completions.create(
-        model=settings.groq_model,
+    stream = _llm.chat.completions.create(**provider_kwargs(),
+        model=settings.llm_model,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
+        temperature=0.3,
+        max_tokens=4096,
         stream=True,
     )
 
@@ -303,8 +303,8 @@ Rules for sub_queries:
 - complex/comparative → 2-3 sub-queries, each standalone and focused"""
 
     try:
-        response = _groq.chat.completions.create(
-            model=settings.groq_model,
+        response = _llm.chat.completions.create(**provider_kwargs(),
+            model=settings.llm_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=250,
@@ -349,8 +349,8 @@ Reply with JSON only:
 If no contradictions: {{"contradictions": []}}"""
 
     try:
-        response = _groq.chat.completions.create(
-            model=settings.groq_model,
+        response = _llm.chat.completions.create(**provider_kwargs(),
+            model=settings.llm_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=300,
@@ -411,8 +411,8 @@ or
 {{"verified": false, "unverified": [1, 3]}}  (list of citation numbers that are NOT supported)"""
 
     try:
-        response = _groq.chat.completions.create(
-            model=settings.groq_model,
+        response = _llm.chat.completions.create(**provider_kwargs(),
+            model=settings.llm_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=150,
@@ -447,8 +447,8 @@ Answer:
 Reply with JSON only — no explanation:
 {{"grounded": true}} or {{"grounded": false}}"""
 
-    response = _groq.chat.completions.create(
-        model=settings.groq_model,
+    response = _llm.chat.completions.create(**provider_kwargs(),
+        model=settings.llm_model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )

@@ -19,13 +19,12 @@ Return ONLY JSON."""
 
 
 def _extract_query_entities(query: str) -> list[str]:
-    from groq import Groq
     from backend.core.config import settings as _s
+    from backend.core.llm import llm, provider_kwargs
 
-    groq = Groq(api_key=_s.groq_api_key)
     try:
-        response = groq.chat.completions.create(
-            model=_s.groq_model,
+        response = llm.chat.completions.create(**provider_kwargs(),
+            model=_s.llm_model,
             messages=[
                 {"role": "system", "content": _SYSTEM},
                 {"role": "user", "content": query},

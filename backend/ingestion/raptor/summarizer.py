@@ -2,17 +2,15 @@ import logging
 import uuid
 
 import numpy as np
-from groq import Groq
 from qdrant_client.models import PointStruct
 from sklearn.cluster import KMeans
 
 from backend.core.config import settings
+from backend.core.llm import llm as _llm, provider_kwargs
 from backend.db.qdrant_client import client as qdrant_client
 from backend.ingestion.embedding.embedding_service import EmbeddingService
 
 log = logging.getLogger("researchos.raptor")
-
-_groq = Groq(api_key=settings.groq_api_key)
 _embedder = EmbeddingService()
 
 _SYSTEM = (
@@ -48,7 +46,8 @@ def _fetch_base_chunks(domain: str | None = None) -> list[dict]:
             "domain": p.payload.get("domain"),
         }
         for p in all_points
-        if p.payload.get("chunk_type") != "summary"
+        if p.vector is not None
+        and p.payload.get("chunk_type") != "summary"
         and (domain is None or p.payload.get("domain") == domain)
     ]
     log.info("[raptor] fetched %d base chunks from Qdrant", len(chunks))
@@ -68,8 +67,8 @@ def _cluster(chunks: list[dict], n_clusters: int) -> list[list[dict]]:
 
 def _summarize_cluster(texts: list[str]) -> str:
     combined = "\n\n---\n\n".join(t[:500] for t in texts[:8])
-    response = _groq.chat.completions.create(
-        model=settings.groq_model,
+    response = _llm.chat.completions.create(**provider_kwargs(),
+        model=settings.llm_model,
         messages=[
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": combined},

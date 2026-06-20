@@ -7,13 +7,22 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
-    # LLM
-    groq_api_key: str = Field(description="Groq API key")
-    groq_model: str = Field(
-        default="llama-3.3-70b-versatile",
-        description="Groq model ID used for generation"
+    # LLM — OpenRouter
+    openrouter_api_key: str = Field(description="OpenRouter API key")
+    llm_model: str = Field(
+        default="meta-llama/llama-3.3-70b-instruct:free",
+        description="OpenRouter model ID — use :free suffix for free models"
+    )
+    fast_llm_model: str = Field(
+        default="google/gemma-3-4b-it:free",
+        description="Smaller/faster model for domain check, HyDE — set FAST_LLM_MODEL in .env"
+    )
+    llm_provider: str | None = Field(
+        default=None,
+        description="OpenRouter provider preference e.g. 'Fireworks', 'Together', 'DeepInfra'. None = OpenRouter auto-selects."
     )
 
     # Databases

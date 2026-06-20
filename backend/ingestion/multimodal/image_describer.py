@@ -1,15 +1,11 @@
 import base64
 import logging
 
-from groq import Groq
-
 from backend.core.config import settings
+from backend.core.llm import llm as _llm, provider_kwargs
 
 log = logging.getLogger("researchos.ingestion.multimodal")
 
-_groq = Groq(api_key=settings.groq_api_key)
-
-# Groq vision model — supports image input
 _VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 _PROMPT = (
@@ -20,26 +16,18 @@ _PROMPT = (
 
 
 def describe_image(image_bytes: bytes) -> str | None:
-    """Send raw image bytes to Groq vision and return a text description.
-
-    Returns None on failure so callers can safely skip the image.
-    Minimum size check avoids sending tiny icons or decorative elements.
-    """
-    if len(image_bytes) < 5_000:  # skip images < 5 KB (likely icons/borders)
+    if len(image_bytes) < 5_000:
         return None
 
     try:
         b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-        response = _groq.chat.completions.create(
+        response = _llm.chat.completions.create(**provider_kwargs(),
             model=_VISION_MODEL,
             messages=[
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{b64}"},
-                        },
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
                         {"type": "text", "text": _PROMPT},
                     ],
                 }
