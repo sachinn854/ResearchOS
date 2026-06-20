@@ -1,39 +1,37 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { getTaskStatus, ingestAsync, ingestSync } from "@/lib/api"
+import { getTaskStatus, ingestAsync, uploadFile } from "@/lib/api"
 
-const DOMAINS = ["ml", "dl", "cs", "physics", "bio", "finance", "math"]
-
-type Mode = "sync" | "async"
+const DOMAINS = [
+  { value: "ml", label: "ML / AI" },
+  { value: "dl", label: "Deep Learning" },
+  { value: "cs", label: "Computer Science" },
+  { value: "physics", label: "Physics" },
+  { value: "bio", label: "Biology" },
+  { value: "finance", label: "Finance" },
+  { value: "math", label: "Mathematics" },
+]
 
 interface IngestResult {
-  type: Mode
   taskId?: string
   documentId?: string
   status: string
-  message?: string
 }
 
 export default function IngestPage() {
   const [title, setTitle] = useState("")
-  const [source, setSource] = useState("")
   const [domain, setDomain] = useState("ml")
-  const [mode, setMode] = useState<Mode>("async")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<IngestResult | null>(null)
   const [taskStatus, setTaskStatus] = useState<string | null>(null)
+  const [dragOver, setDragOver] = useState(false)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [urlSource, setUrlSource] = useState("")
+  const [tab, setTab] = useState<"file" | "url">("file")
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
@@ -48,17 +46,36 @@ export default function IngestPage() {
     }, 3000)
   }
 
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files[0]
+    if (!file) return
+    setSelectedFile(file)
+    if (!title) setTitle(file.name.replace(/\.[^.]+$/, ""))
+  }, [title])
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setSelectedFile(file)
+    if (!title) setTitle(file.name.replace(/\.[^.]+$/, ""))
+  }
+
   async function handleSubmit() {
-    const t = title.trim(), s = source.trim()
-    if (!t || !s || loading) return
+    const t = title.trim()
+    if (!t || loading) return
     setLoading(true); setError(null); setResult(null); setTaskStatus(null)
     try {
-      if (mode === "sync") {
-        const res = await ingestSync({ title: t, source: s, domain })
-        setResult({ type: "sync", documentId: res.document_id, status: res.status })
+      if (tab === "file") {
+        if (!selectedFile) { setError("Please select a file"); setLoading(false); return }
+        const res = await uploadFile(selectedFile, t, domain)
+        setResult({ documentId: res.document_id, status: res.status })
       } else {
-        const res = await ingestAsync({ title: t, source: s, domain })
-        setResult({ type: "async", taskId: res.task_id, status: res.status, message: res.message })
+        const u = urlSource.trim()
+        if (!u) { setError("Please enter a URL"); setLoading(false); return }
+        const res = await ingestAsync({ title: t, source: u, domain })
+        setResult({ taskId: res.task_id, status: res.status })
         startPolling(res.task_id)
       }
     } catch (err) {
@@ -67,25 +84,35 @@ export default function IngestPage() {
   }
 
   const currentStatus = taskStatus ?? result?.status ?? ""
-  const statusStyles: Record<string, string> = {
-    completed: "bg-emerald-900/60 text-emerald-400 border-emerald-800",
-    failed: "bg-red-900/60 text-red-400 border-red-800",
-    running: "bg-blue-900/60 text-blue-400 border-blue-800",
-    queued: "bg-yellow-900/60 text-yellow-400 border-yellow-800",
-  }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen" style={{ background: "var(--background)", color: "var(--foreground)" }}>
+
       {/* Sidebar */}
-      <aside className="w-60 shrink-0 flex flex-col bg-zinc-900 border-r border-zinc-800">
-        <div className="px-5 py-5 border-b border-zinc-800">
-          <span className="font-bold text-lg tracking-tight text-white">ResearchOS</span>
-          <p className="text-xs text-zinc-500 mt-0.5">AI Research Assistant</p>
+      <aside className="w-60 shrink-0 flex flex-col" style={{ background: "var(--sidebar)", borderRight: "1px solid var(--sidebar-border)" }}>
+        <div className="px-5 py-5" style={{ borderBottom: "1px solid var(--sidebar-border)" }}>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-base font-bold"
+              style={{ background: "linear-gradient(135deg, #4f8ef7 0%, #7c5df7 100%)" }}>
+              R
+            </div>
+            <div>
+              <p className="font-semibold text-[15px] leading-tight" style={{ color: "var(--foreground)" }}>ResearchOS</p>
+              <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>AI Research Assistant</p>
+            </div>
+          </div>
         </div>
-        <div className="px-4 py-4 flex-1">
-          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Navigation</p>
-          <Link href="/">
-            <button className="w-full text-left px-3 py-2 rounded-lg text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 transition-colors">
+
+        <div className="px-3 py-4 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-widest px-2 mb-3" style={{ color: "var(--muted-foreground)" }}>
+            Navigation
+          </p>
+          <Link href="/" className="block">
+            <button className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-all"
+              style={{ color: "var(--muted-foreground)" }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "var(--foreground)" }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ""; (e.currentTarget as HTMLElement).style.color = "var(--muted-foreground)" }}
+            >
               ← Back to Chat
             </button>
           </Link>
@@ -93,108 +120,204 @@ export default function IngestPage() {
       </aside>
 
       {/* Main */}
-      <div className="flex-1 bg-zinc-950 overflow-auto">
+      <div className="flex-1 overflow-auto">
         <div className="max-w-xl mx-auto px-6 py-12">
-          <h1 className="text-2xl font-bold text-zinc-100 mb-1">Add Document</h1>
-          <p className="text-zinc-500 text-sm mb-8">Ingest a PDF or URL into the knowledge base.</p>
 
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-5">
+          <div className="mb-8">
+            <h1 className="text-2xl font-semibold mb-2" style={{ color: "var(--foreground)" }}>Add Document</h1>
+            <p className="text-base" style={{ color: "var(--muted-foreground)" }}>
+              Upload a PDF or paste a URL — runs through the full ingestion pipeline: parse → chunk → embed → store.
+            </p>
+          </div>
+
+          <div className="rounded-2xl p-6 space-y-5" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+
+            {/* Tab selector */}
+            <div className="flex gap-1 p-1 rounded-xl" style={{ background: "var(--secondary)" }}>
+              {(["file", "url"] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
+                  style={tab === t ? {
+                    background: "var(--card)",
+                    color: "var(--foreground)",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                  } : {
+                    color: "var(--muted-foreground)",
+                  }}
+                >
+                  {t === "file" ? "Upload PDF" : "URL / Path"}
+                </button>
+              ))}
+            </div>
+
+            {/* File drag & drop */}
+            {tab === "file" && (
+              <div
+                onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all"
+                style={dragOver ? {
+                  borderColor: "#4f8ef7",
+                  background: "rgba(79,142,247,0.06)",
+                } : selectedFile ? {
+                  borderColor: "#34d399",
+                  background: "rgba(52,211,153,0.06)",
+                } : {
+                  borderColor: "var(--border)",
+                }}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.txt,.md,.docx"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                {selectedFile ? (
+                  <div>
+                    <div className="text-3xl mb-3">📄</div>
+                    <p className="text-base font-medium" style={{ color: "#34d399" }}>{selectedFile.name}</p>
+                    <p className="text-sm mt-1" style={{ color: "var(--muted-foreground)" }}>
+                      {(selectedFile.size / 1024).toFixed(0)} KB · Click to change
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="text-3xl mb-3 opacity-40">📁</div>
+                    <p className="text-base font-medium" style={{ color: "var(--foreground)" }}>Drag & drop your file here</p>
+                    <p className="text-sm mt-1" style={{ color: "var(--muted-foreground)" }}>
+                      or click to browse · PDF, TXT, DOCX, MD
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* URL input */}
+            {tab === "url" && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium" style={{ color: "var(--foreground)" }}>URL or File Path</label>
+                <input
+                  value={urlSource}
+                  onChange={e => setUrlSource(e.target.value)}
+                  placeholder="https://arxiv.org/pdf/2005.11401"
+                  disabled={loading}
+                  className="w-full px-3.5 py-2.5 rounded-xl text-base outline-none transition-all"
+                  style={{
+                    background: "var(--secondary)",
+                    border: "1px solid var(--border)",
+                    color: "var(--foreground)",
+                  }}
+                  onFocus={e => { e.currentTarget.style.borderColor = "#4f8ef7" }}
+                  onBlur={e => { e.currentTarget.style.borderColor = "var(--border)" }}
+                />
+              </div>
+            )}
+
             {/* Title */}
             <div className="space-y-2">
-              <label className="text-sm font-medium text-zinc-300">Title</label>
-              <Input
+              <label className="text-sm font-medium" style={{ color: "var(--foreground)" }}>Document Title</label>
+              <input
                 value={title}
                 onChange={e => setTitle(e.target.value)}
                 placeholder="Attention Is All You Need"
                 disabled={loading}
-                className="bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-blue-600"
+                className="w-full px-3.5 py-2.5 rounded-xl text-base outline-none transition-all"
+                style={{
+                  background: "var(--secondary)",
+                  border: "1px solid var(--border)",
+                  color: "var(--foreground)",
+                }}
+                onFocus={e => { e.currentTarget.style.borderColor = "#4f8ef7" }}
+                onBlur={e => { e.currentTarget.style.borderColor = "var(--border)" }}
               />
             </div>
 
-            {/* Source */}
+            {/* Domain */}
             <div className="space-y-2">
-              <label className="text-sm font-medium text-zinc-300">Source</label>
-              <Input
-                value={source}
-                onChange={e => setSource(e.target.value)}
-                placeholder="data/arxiv_papers/paper.pdf  or  https://…"
+              <label className="text-sm font-medium" style={{ color: "var(--foreground)" }}>Domain</label>
+              <select
+                value={domain}
+                onChange={e => setDomain(e.target.value)}
                 disabled={loading}
-                className="bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-blue-600"
-              />
-              <p className="text-xs text-zinc-600">File path (relative to backend root) or a URL</p>
-            </div>
-
-            {/* Domain + Mode */}
-            <div className="flex gap-3">
-              <div className="space-y-2 flex-1">
-                <label className="text-sm font-medium text-zinc-300">Domain</label>
-                <Select value={domain} onValueChange={setDomain} disabled={loading}>
-                  <SelectTrigger className="bg-zinc-800 border-zinc-700 text-zinc-100">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-zinc-800 border-zinc-700">
-                    {DOMAINS.map(d => (
-                      <SelectItem key={d} value={d} className="text-zinc-100 focus:bg-zinc-700">
-                        {d.toUpperCase()}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2 flex-1">
-                <label className="text-sm font-medium text-zinc-300">Mode</label>
-                <Select value={mode} onValueChange={v => setMode(v as Mode)} disabled={loading}>
-                  <SelectTrigger className="bg-zinc-800 border-zinc-700 text-zinc-100">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-zinc-800 border-zinc-700">
-                    <SelectItem value="async" className="text-zinc-100 focus:bg-zinc-700">Async</SelectItem>
-                    <SelectItem value="sync" className="text-zinc-100 focus:bg-zinc-700">Sync (wait)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                className="w-full px-3.5 py-2.5 rounded-xl text-base outline-none transition-all appearance-none"
+                style={{
+                  background: "var(--secondary)",
+                  border: "1px solid var(--border)",
+                  color: "var(--foreground)",
+                }}
+              >
+                {DOMAINS.map(d => (
+                  <option key={d.value} value={d.value} style={{ background: "var(--card)" }}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Submit */}
-            <Button
+            <button
               onClick={handleSubmit}
-              disabled={loading || !title.trim() || !source.trim()}
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white h-11"
+              disabled={loading || !title.trim() || (tab === "file" ? !selectedFile : !urlSource.trim())}
+              className="w-full py-3 rounded-xl text-base font-semibold text-white transition-all"
+              style={loading || !title.trim() || (tab === "file" ? !selectedFile : !urlSource.trim()) ? {
+                background: "var(--secondary)",
+                color: "var(--muted-foreground)",
+                cursor: "not-allowed",
+              } : {
+                background: "linear-gradient(135deg, #4f8ef7 0%, #3a7aec 100%)",
+                boxShadow: "0 4px 16px rgba(79,142,247,0.35)",
+              }}
             >
-              {loading ? "Ingesting…" : "Ingest Document"}
-            </Button>
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  Ingesting…
+                </span>
+              ) : "Ingest Document"}
+            </button>
 
             {/* Error */}
             {error && (
-              <div className="text-sm text-red-400 bg-red-950/50 border border-red-900 rounded-xl px-4 py-3">
+              <div className="rounded-xl px-4 py-3.5 text-sm"
+                style={{ background: "rgba(229,87,87,0.1)", border: "1px solid rgba(229,87,87,0.25)", color: "#e57373" }}>
                 {error}
               </div>
             )}
 
             {/* Result */}
-            {result && (
-              <div className={`rounded-xl border px-4 py-3 space-y-2 ${statusStyles[currentStatus] ?? "bg-zinc-800 border-zinc-700 text-zinc-300"}`}>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Status</span>
-                  <span className="text-sm font-mono font-semibold capitalize">
-                    {currentStatus}
-                    {(currentStatus === "queued" || currentStatus === "running") && (
-                      <span className="ml-2 animate-pulse">…</span>
-                    )}
-                  </span>
+            {result && (() => {
+              const statusMap: Record<string, { bg: string; color: string; label: string }> = {
+                completed: { bg: "rgba(52,211,153,0.1)", color: "#34d399", label: "Completed" },
+                failed: { bg: "rgba(229,87,87,0.1)", color: "#e57373", label: "Failed" },
+                running: { bg: "rgba(79,142,247,0.1)", color: "#4f8ef7", label: "Running…" },
+                queued: { bg: "rgba(251,191,36,0.1)", color: "#fbbf24", label: "Queued…" },
+              }
+              const s = statusMap[currentStatus] ?? { bg: "var(--secondary)", color: "var(--muted-foreground)", label: currentStatus }
+              return (
+                <div className="rounded-xl px-4 py-4 space-y-2"
+                  style={{ background: s.bg, border: `1px solid ${s.color}30` }}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium" style={{ color: "var(--foreground)" }}>Status</span>
+                    <span className="text-sm font-semibold" style={{ color: s.color }}>{s.label}</span>
+                  </div>
+                  {result.taskId && (
+                    <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+                      Task: <code className="font-mono">{result.taskId}</code>
+                    </p>
+                  )}
+                  {result.documentId && (
+                    <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+                      Doc ID: <code className="font-mono">{result.documentId}</code>
+                    </p>
+                  )}
                 </div>
-                {result.taskId && (
-                  <p className="text-xs opacity-70">
-                    Task: <code>{result.taskId}</code>
-                  </p>
-                )}
-                {result.documentId && (
-                  <p className="text-xs opacity-70">
-                    Doc ID: <code>{result.documentId}</code>
-                  </p>
-                )}
-              </div>
-            )}
+              )
+            })()}
           </div>
         </div>
       </div>
