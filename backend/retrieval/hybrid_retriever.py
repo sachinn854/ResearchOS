@@ -1,20 +1,22 @@
+import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.retrieval.dense_retriever import DenseRetriever, RetrievedChunk
 from backend.retrieval.sparse_retriever import SparseRetriever
-from backend.retrieval.reranker import Reranker
 from backend.retrieval.hyde import generate_hypothetical_document
 from backend.retrieval.graph_expander import retrieve_by_entities
 
 log = logging.getLogger("researchos.retrieval.hybrid")
 
+_thread_pool = ThreadPoolExecutor(max_workers=4)
+
 
 def _reciprocal_rank_fusion(
     results_lists: list[list[RetrievedChunk]], k: int = 60
 ) -> list[RetrievedChunk]:
-    """Combine multiple ranked lists into one using Reciprocal Rank Fusion."""
     scores: dict[str, float] = {}
     chunk_map: dict[str, RetrievedChunk] = {}
 
@@ -25,14 +27,18 @@ def _reciprocal_rank_fusion(
             chunk_map[key] = chunk
 
     sorted_keys = sorted(scores, key=lambda x: scores[x], reverse=True)
-    return [chunk_map[key] for key in sorted_keys]
+    fused = [chunk_map[key] for key in sorted_keys]
+
+    for chunk, key in zip(fused, sorted_keys):
+        chunk.score = round(scores[key], 4)
+
+    return fused
 
 
 class HybridRetriever:
     def __init__(self, use_hyde: bool = True, use_graph: bool = True):
         self.dense = DenseRetriever()
         self.sparse = SparseRetriever()
-        self.reranker = Reranker()
         self.use_hyde = use_hyde
         self.use_graph = use_graph
 
@@ -40,44 +46,50 @@ class HybridRetriever:
         self,
         query: str,
         db: AsyncSession,
-        top_k: int = 5,
+        top_k: int = 8,
         domain: str | None = None,
-    ) -> list[RetrievedChunk]:
-        """Dense + sparse + graph retrieval fused with RRF, then reranked.
+    ) -> tuple[list[RetrievedChunk], float]:
+        """Returns (chunks, best_dense_score).
 
-        - Dense uses HyDE (hypothetical document embedding)
-        - Sparse uses original query (keyword matching)
-        - Graph uses entity overlap matching
+        best_dense_score is the raw Qdrant cosine similarity of the top result
+        (range 0-1). Use this for web fallback decisions — RRF scores are
+        rank-based (always ~0.013-0.033) and meaningless for relevance threshold.
         """
-        log.info("[hybrid] starting retrieval | query=%r | hyde=%s | graph=%s | domain=%s",
-                 query[:60], self.use_hyde, self.use_graph, domain)
+        log.info("[hybrid] starting retrieval | hyde=%s | graph=%s | domain=%s",
+                 self.use_hyde, self.use_graph, domain)
 
-        dense_query = query
+        loop = asyncio.get_event_loop()
+
+        # Run HyDE (blocking LLM call) and sparse (async DB) concurrently
         if self.use_hyde:
-            dense_query = generate_hypothetical_document(query)
+            hyde_task = loop.run_in_executor(_thread_pool, generate_hypothetical_document, query)
+            sparse_task = self.sparse.retrieve(query, db=db, top_k=20, domain=domain)
+            dense_query, sparse_results = await asyncio.gather(hyde_task, sparse_task)
+        else:
+            sparse_results = await self.sparse.retrieve(query, db=db, top_k=20, domain=domain)
+            dense_query = query
 
-        dense_results = self.dense.retrieve(dense_query, top_k=20, domain=domain)
-        sparse_results = await self.sparse.retrieve(query, db=db, top_k=20, domain=domain)
+        # Dense runs after HyDE (needs the hypothetical doc as query)
+        dense_results = await loop.run_in_executor(
+            _thread_pool, self.dense.retrieve, dense_query, 20, domain
+        )
+
+        # Capture best cosine similarity BEFORE RRF overwrites scores
+        best_dense_score = max((c.score for c in dense_results), default=0.0)
+        log.info("[hybrid] best_dense_score=%.3f", best_dense_score)
 
         results_to_fuse = [dense_results, sparse_results]
 
         if self.use_graph:
-            graph_results = retrieve_by_entities(query, top_k=10, domain=domain)
+            graph_results = await loop.run_in_executor(
+                _thread_pool, retrieve_by_entities, query, 10, domain
+            )
             if graph_results:
                 results_to_fuse.append(graph_results)
-                log.info("[hybrid] graph=%d chunks added to fusion pool", len(graph_results))
+                log.info("[hybrid] graph=%d chunks added", len(graph_results))
 
-        log.info("[hybrid] dense=%d | sparse=%d — fusing with RRF...",
-                 len(dense_results), len(sparse_results))
         fused = _reciprocal_rank_fusion(results_to_fuse)
-        log.info("[hybrid] fused=%d unique chunks", len(fused))
+        final = fused[:top_k]
 
-        final = self.reranker.rerank(query, chunks=fused[:20], top_k=top_k)
-
-        # Confidence threshold — drop results if best score is too low
-        if final and final[0].score < 0.65:
-            log.info("[hybrid] low confidence (top score=%.3f < 0.65) — returning empty", final[0].score)
-            return []
-
-        log.info("[hybrid] final top_%d chunks ready", len(final))
-        return final
+        log.info("[hybrid] final %d chunks ready | best_dense=%.3f", len(final), best_dense_score)
+        return final, best_dense_score

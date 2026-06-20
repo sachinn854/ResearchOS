@@ -15,7 +15,7 @@ class IngestResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str = Field(description="Research question to answer")
-    top_k: int = Field(default=5, description="Number of chunks to retrieve from the vector store")
+    top_k: int = Field(default=8, description="Number of chunks to retrieve from the vector store")
     domain: str | None = Field(default=None, description="Filter retrieval to a specific domain")
     session_id: str | None = Field(default=None, description="Session ID for conversation memory")
 
@@ -25,6 +25,8 @@ class SourceItem(BaseModel):
     chunk_index: int
     page_number: int | None
     score: float
+    title: str | None = None
+    text: str | None = None
 
 
 class QueryResponse(BaseModel):
