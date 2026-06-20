@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import String, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -17,7 +17,7 @@ class Document(Base):
     file_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
     domain: Mapped[str | None] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(50), default="processing")
-    ingested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
         return f"<Document id={self.id} title={self.title}>"

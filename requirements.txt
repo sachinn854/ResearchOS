@@ -19,28 +19,20 @@ pydantic-settings
 # LLM Providers
 # -------------------------------------------------------------
 openai
-anthropic
-groq
 
 # -------------------------------------------------------------
 # Agent Orchestration
 # -------------------------------------------------------------
 langgraph
 langchain-core
-langchain-openai
-langchain-anthropic
 langchain-community
 langchain-text-splitters
-langchain-experimental
-langchain-huggingface
-langchain-groq
+langchain-openai
 
 # -------------------------------------------------------------
-# Embeddings & Reranking
+# Embeddings (ONNX-based, no torch needed)
 # -------------------------------------------------------------
-sentence-transformers
-torch
-transformers
+fastembed
 
 # -------------------------------------------------------------
 # Vector Database
@@ -60,7 +52,6 @@ alembic
 # -------------------------------------------------------------
 redis
 celery
-flower
 kombu
 
 # -------------------------------------------------------------
@@ -73,8 +64,6 @@ trafilatura
 beautifulsoup4
 lxml
 markdown-it-py
-youtube-transcript-api
-pytesseract
 pillow
 
 # -------------------------------------------------------------
@@ -88,31 +77,14 @@ tavily-python
 # Evaluation
 # -------------------------------------------------------------
 ragas
-deepeval
 datasets
 pytest
 pytest-asyncio
 
 # -------------------------------------------------------------
-# Observability & Tracing
+# Observability
 # -------------------------------------------------------------
 langfuse
-prometheus-client
-opentelemetry-sdk
-opentelemetry-instrumentation-fastapi
-opentelemetry-exporter-otlp
-
-# -------------------------------------------------------------
-# Auth & Security
-# -------------------------------------------------------------
-python-jose[cryptography]
-passlib[bcrypt]
-bcrypt
-
-# -------------------------------------------------------------
-# File Storage
-# -------------------------------------------------------------
-boto3
 
 # -------------------------------------------------------------
 # Utilities
