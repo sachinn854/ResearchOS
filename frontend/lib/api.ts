@@ -1,5 +1,24 @@
 // BUG-032: was 8000 — docker-compose maps backend to 8001:8000
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001"
+//
+// `||` and not `??` on purpose. With `??`, an empty string counts as a value, so
+// NEXT_PUBLIC_API_URL="" left API_BASE empty and every call became a relative URL
+// — POST "/auth/register" then hit the Next.js server itself and came back as
+// Next's 404 HTML page, which reads like a routing bug rather than a missing
+// config. Trailing slashes are stripped so a value like "https://api.example.com/"
+// does not produce "//auth/register".
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:8001").replace(/\/+$/, "")
+
+// NEXT_PUBLIC_* is inlined at build time, not read at runtime. Setting it only as
+// a runtime variable leaves the build's default baked into the bundle, so warn
+// loudly when the page is served from a real host but still points at localhost.
+if (typeof window !== "undefined"
+    && API_BASE.includes("localhost")
+    && !window.location.hostname.match(/^(localhost|127\.0\.0\.1)$/)) {
+  console.error(
+    `[ResearchOS] NEXT_PUBLIC_API_URL is not set for this build — API calls are going to ${API_BASE} ` +
+    `and will fail. It must be passed as a Docker build arg, because Next.js inlines it at build time.`,
+  )
+}
 
 import { clearToken, getToken, type User } from "@/lib/auth"
 
