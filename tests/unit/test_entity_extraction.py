@@ -17,6 +17,18 @@ import pytest
 from backend.ingestion.graph import entity_extractor as ee
 
 
+@pytest.fixture(autouse=True)
+def extraction_enabled(monkeypatch):
+    """Force the feature on regardless of the developer's .env.
+
+    Without this the suite passes or fails depending on whether
+    ENABLE_ENTITY_EXTRACTION happens to be set locally — the tests below assert
+    what the extractor does when it runs, which is a separate question from
+    whether it is switched on in any given environment.
+    """
+    monkeypatch.setattr(ee.settings, "enable_entity_extraction", True)
+
+
 @pytest.fixture
 def stub_llm(monkeypatch):
     """Swap in a fake LLM. Returns the list that records every call made."""

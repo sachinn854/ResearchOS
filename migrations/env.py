@@ -1,7 +1,7 @@
 import sys
 import os
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
 from alembic import context
 
 sys.path.append(os.getcwd())
@@ -19,6 +19,10 @@ target_metadata = Base.metadata
 
 # asyncpg URL ko sync psycopg2 URL mein convert karo — Alembic sync driver use karta hai
 sync_url = settings.postgres_url.replace("postgresql+asyncpg", "postgresql+psycopg2")
+
+# Which schema our tables live in. Defaults to public; set POSTGRES_SCHEMA when
+# the database is shared with another app whose tables have the same names.
+SCHEMA = settings.postgres_schema
 
 
 def run_migrations_offline() -> None:
@@ -42,7 +46,24 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        if SCHEMA != "public":
+            # Create the schema before anything else, then pin search_path so the
+            # migrations' unqualified CREATE TABLE / CREATE INDEX statements land
+            # in it. Without this they would target public and collide with a
+            # co-tenant application's tables.
+            connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
+            connection.execute(text(f'SET search_path TO "{SCHEMA}"'))
+            connection.commit()
+
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            # Keep alembic_version in our schema too. Left in public it would
+            # look like the co-tenant app's migration state, and two projects
+            # would fight over one version row.
+            version_table_schema=None if SCHEMA == "public" else SCHEMA,
+            include_schemas=SCHEMA != "public",
+        )
         with context.begin_transaction():
             context.run_migrations()
 

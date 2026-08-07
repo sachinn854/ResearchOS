@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.routes.auth import router as auth_router
 from backend.api.routes.research import router as research_router
+from backend.core.config import settings
 from backend.db.qdrant_client import init_collection
 
 LOGGING_CONFIG = {
@@ -46,10 +47,15 @@ app = FastAPI(title="ResearchOS", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    # Driven by CORS_ORIGINS so a deployed frontend can be allowed without a code
+    # change. Note this must list exact origins — "*" is not usable here because
+    # the frontend sends an Authorization header, and browsers reject a wildcard
+    # origin on credentialed requests.
+    allow_origins=settings.cors_origin_list,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+log.info("CORS allowed origins: %s", settings.cors_origin_list)
 
 app.include_router(auth_router)
 app.include_router(research_router)

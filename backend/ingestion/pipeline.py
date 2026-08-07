@@ -24,6 +24,11 @@ from sqlalchemy import select
 
 log = logging.getLogger("researchos.ingestion.pipeline")
 
+# How many vectors go in one Qdrant request. 384-dim vector plus the chunk text
+# in the payload is a few KB per point, so 64 keeps each request small enough to
+# finish comfortably inside the client timeout.
+QDRANT_UPSERT_BATCH = 64
+
 # BUG-013: singleton — fastembed model loaded once per process, not per request
 _embedder: EmbeddingService | None = None
 
@@ -48,7 +53,7 @@ def _detect_type(source: str) -> str:
 
 def _get_parser(doc_type: str) -> BaseParser:
     match doc_type:
-        case "pdf":  return PDFParser()
+        case "pdf":  return PDFParser(extract_images=settings.enable_image_description)
         case "docx": return DOCXParser()
         case "web":  return WebParser()
         case _:      return TXTParser()
@@ -188,11 +193,18 @@ async def ingest_document(
     # BUG-015: Qdrant upsert is synchronous — wrap in thread to avoid blocking the event loop
     log.info("[pipeline] upserting %d vectors to Qdrant...", len(qdrant_points))
     try:
-        await asyncio.to_thread(
-            qdrant_client.upsert,
-            collection_name=settings.qdrant_collection,
-            points=qdrant_points,
-        )
+        # Upsert in batches. One request carrying 300+ vectors times out against
+        # Qdrant Cloud, and because Postgres is already committed by this point a
+        # timeout leaves the document with text in the sparse index and nothing
+        # in the dense one.
+        for start in range(0, len(qdrant_points), QDRANT_UPSERT_BATCH):
+            batch = qdrant_points[start:start + QDRANT_UPSERT_BATCH]
+            await asyncio.to_thread(
+                qdrant_client.upsert,
+                collection_name=settings.qdrant_collection,
+                points=batch,
+            )
+            log.debug("[pipeline] upserted %d/%d vectors", start + len(batch), len(qdrant_points))
     except Exception as exc:
         log.error("[pipeline] Qdrant upsert failed — marking document as failed | id=%s | error=%s", doc.id, exc)
         doc.status = "failed"

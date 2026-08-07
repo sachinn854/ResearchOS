@@ -3,7 +3,12 @@ from qdrant_client.models import Distance, VectorParams
 from backend.core.config import settings
 
 
-client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+# timeout: the client defaults to 5s, which is not enough to upsert a few hundred
+# vectors to Qdrant Cloud over the public internet. A large paper would fail with
+# "The write operation timed out" and the pipeline marked the whole document
+# failed — after its chunks were already committed to Postgres, leaving text in
+# the sparse index with no vector in the dense one.
+client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key, timeout=120)
 
 
 def init_collection():
