@@ -76,10 +76,20 @@ tavily-python
 # -------------------------------------------------------------
 # Evaluation
 # -------------------------------------------------------------
-ragas
-datasets
+# ragas + datasets removed: nothing imported them. backend/evaluation/evaluator.py
+# computes the same four metrics with LLM-as-judge prompts against our existing
+# OpenRouter client, which avoids pulling in datasets/pyarrow and a pinned
+# LangChain adapter for four numbers.
 pytest
 pytest-asyncio
+
+# -------------------------------------------------------------
+# Auth
+# -------------------------------------------------------------
+pyjwt
+bcrypt
+# Needed by pydantic's EmailStr in backend/api/schemas/auth.py
+email-validator
 
 # -------------------------------------------------------------
 # Observability

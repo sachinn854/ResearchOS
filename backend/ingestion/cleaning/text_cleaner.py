@@ -15,11 +15,13 @@ _REFERENCE_LINE = re.compile(r"^\s*\[\d+\]")
 _ORCID = re.compile(r"orcid\.org", re.IGNORECASE)
 _URL_ONLY_LINE = re.compile(r"^\s*https?://\S+\s*$")
 
-# Section headings that signal non-content (truncate everything after these)
+# Section headings that signal non-content (truncate everything after these).
+# BUG-019: "appendix" removed — appendix content is often valuable and "See Appendix"
+# mid-paragraph would have caused premature truncation.
 _NOISE_SECTION_HEADING = re.compile(
     r"^(references|bibliography|acknowledgments?|acknowledgements?|"
     r"about the authors?|author contributions?|funding|competing interests?|"
-    r"conflict of interest|appendix)\s*$",
+    r"conflict of interest)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -95,8 +97,13 @@ def is_clean_chunk(text: str, min_words: int = 30) -> bool:
         log.debug("drop — contains email")
         return False
 
-    if _DOI.search(text):
-        log.debug("drop — contains DOI")
+    # BUG-020: was _DOI.search(text) — that dropped chunks with inline DOI citations
+    # (e.g. "This work extends [25] (doi:10.1145/...)"). Now only drop chunks where
+    # the majority of lines are DOI-only lines (pure reference sections).
+    doi_lines = sum(1 for line in text.splitlines() if _DOI.search(line.strip()) and len(line.strip()) < 80)
+    total_lines = max(len(text.splitlines()), 1)
+    if doi_lines / total_lines > 0.5:
+        log.debug("drop — majority DOI lines (%d/%d)", doi_lines, total_lines)
         return False
 
     # Alphabetic ratio — pure number tables / metadata score very low

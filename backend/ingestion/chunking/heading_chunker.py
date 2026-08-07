@@ -5,8 +5,12 @@ from backend.ingestion.parsers.base import ParsedPage
 
 
 class HeadingChunker(BaseChunker):
-    """Each ParsedPage from DOCXParser is already one heading section.
-    Sections that exceed max_chunk_size are split further with recursive splitting."""
+    """For section-shaped input: each incoming ParsedPage is already one logical
+    section (DOCXParser splits on Word heading styles, PDFParser on font size).
+
+    A section that fits inside max_chunk_size becomes exactly one chunk, so its
+    boundaries survive. Only oversized sections get split further, and that split
+    never crosses into the next section."""
 
     def __init__(self, max_chunk_size: int = 800, chunk_overlap: int = 100):
         self.max_chunk_size = max_chunk_size

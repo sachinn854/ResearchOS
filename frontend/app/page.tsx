@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
@@ -8,6 +8,7 @@ import {
   queryKBStream, fetchSessions, fetchSessionMessages,
   RateLimitError, type PipelineInfo, type SourceItem, type SessionItem,
 } from "@/lib/api"
+import { useAuth } from "@/lib/auth-context"
 
 const DOMAINS = [
   { value: "all", label: "All Domains", icon: "◈" },
@@ -39,15 +40,6 @@ function randomId() {
   return Math.random().toString(36).slice(2, 10)
 }
 
-function getUserId(): string {
-  let uid = localStorage.getItem("ros_user_id")
-  if (!uid) {
-    uid = randomId() + randomId()  // 16-char permanent user token
-    localStorage.setItem("ros_user_id", uid)
-  }
-  return uid
-}
-
 function timeAgo(isoStr: string | null): string {
   if (!isoStr) return ""
   const diff = Date.now() - new Date(isoStr).getTime()
@@ -60,6 +52,10 @@ function timeAgo(isoStr: string | null): string {
 }
 
 export default function ChatPage() {
+  // user and the auth check now come from the shared provider, which verified
+  // the token against /auth/me instead of reading a cached object out of
+  // localStorage.
+  const { user, loading: authLoading, logout } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [domain, setDomain] = useState("all")
@@ -71,31 +67,41 @@ export default function ChatPage() {
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null)
   const [rateLimitSeconds, setRateLimitSeconds] = useState<number | null>(null)
   const rateLimitTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const streamAbortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    const uid = getUserId()
+    // Wait for the provider to finish checking the token. Redirecting while
+    // authLoading is true would bounce every page refresh to /login, because
+    // user is still null at that point even for a perfectly valid token.
+    if (authLoading) return
+
+    if (!user) { window.location.href = "/login"; return }
+
+    // Session ids are still prefixed with the user id so that a browser shared
+    // by two people does not resume the other person's chat. Ownership itself is
+    // no longer inferred from this string — the backend stores a real user_id
+    // column and filters on the token's user.
     const stored = localStorage.getItem("ros_session_id")
-    // Ensure stored session belongs to this user
-    const id = (stored && stored.startsWith(uid + "_")) ? stored : `${uid}_${randomId()}`
+    const id = (stored && stored.startsWith(user.id + "_")) ? stored : `${user.id}_${randomId()}`
     localStorage.setItem("ros_session_id", id)
     setSessionId(id)
-    fetchSessions(uid).then(setSessions).catch(() => {})
-  }, [])
+    fetchSessions().then(setSessions).catch(() => {})
+  }, [authLoading, user])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
   async function refreshSessions() {
-    try { setSessions(await fetchSessions(getUserId())) } catch { /* non-critical */ }
+    if (!user) return
+    try { setSessions(await fetchSessions()) } catch { /* non-critical */ }
   }
 
   async function loadSession(id: string) {
-    setError(null)
-    setShowSources({})
-    setExpandedChunk(null)
+    if (streamAbortRef.current) { streamAbortRef.current.abort(); streamAbortRef.current = null }
+    setError(null); setShowSources({}); setExpandedChunk(null)
     try {
       const msgs = await fetchSessionMessages(id)
       setMessages(msgs.map(m => ({ role: m.role, content: m.content })))
@@ -107,13 +113,17 @@ export default function ChatPage() {
   }
 
   function startNewChat() {
-    const id = `${getUserId()}_${randomId()}`
+    if (streamAbortRef.current) { streamAbortRef.current.abort(); streamAbortRef.current = null }
+    const id = `${user!.id}_${randomId()}`
     localStorage.setItem("ros_session_id", id)
     setSessionId(id)
-    setMessages([])
-    setError(null)
-    setShowSources({})
-    setExpandedChunk(null)
+    setMessages([]); setError(null); setShowSources({}); setExpandedChunk(null)
+  }
+
+  function handleLogout() {
+    if (streamAbortRef.current) { streamAbortRef.current.abort() }
+    logout()
+    window.location.href = "/login"
   }
 
   async function handleSubmit(query?: string) {
@@ -127,6 +137,8 @@ export default function ChatPage() {
     setMessages(prev => [...prev, { role: "assistant", content: "" }])
 
     try {
+      const abortCtrl = new AbortController()
+      streamAbortRef.current = abortCtrl
       await queryKBStream(
         { query: q, domain: domain === "all" ? null : domain, session_id: sessionId ?? undefined },
         (event) => {
@@ -155,8 +167,10 @@ export default function ChatPage() {
             setMessages(prev => prev.slice(0, -1))
             setError(event.content)
           }
-        }
+        },
+        abortCtrl.signal,
       )
+      streamAbortRef.current = null
       refreshSessions()
     } catch (err) {
       setMessages(prev => prev.slice(0, -1))
@@ -165,11 +179,7 @@ export default function ChatPage() {
         if (rateLimitTimerRef.current) clearInterval(rateLimitTimerRef.current)
         rateLimitTimerRef.current = setInterval(() => {
           setRateLimitSeconds(prev => {
-            if (prev === null || prev <= 1) {
-              clearInterval(rateLimitTimerRef.current!)
-              rateLimitTimerRef.current = null
-              return null
-            }
+            if (prev === null || prev <= 1) { clearInterval(rateLimitTimerRef.current!); rateLimitTimerRef.current = null; return null }
             return prev - 1
           })
         }, 1000)
@@ -189,17 +199,25 @@ export default function ChatPage() {
     setShowSources(prev => ({ ...prev, [idx]: !prev[idx] }))
   }
 
+  // Blank screen while the token is being verified, and also once we know there
+  // is no user — in that case the effect above is already redirecting, and
+  // rendering the chat UI for a split second first would flash a signed-in
+  // layout at someone who is not signed in.
+  if (authLoading || !user) {
+    return <div className="h-screen" style={{ background: "var(--background)" }} />
+  }
+
   return (
     <div className="flex h-screen" style={{ background: "var(--background)", color: "var(--foreground)" }}>
 
-      {/* ── Sidebar ── */}
+      {/* Sidebar */}
       <aside className="w-60 shrink-0 flex flex-col" style={{ background: "var(--sidebar)", borderRight: "1px solid var(--sidebar-border)" }}>
 
         {/* Logo + New Chat */}
         <div className="px-4 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid var(--sidebar-border)" }}>
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold"
-              style={{ background: "linear-gradient(135deg, #4f8ef7 0%, #7c5df7 100%)" }}>
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold"
+              style={{ background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)" }}>
               R
             </div>
             <span className="font-semibold text-[14px]" style={{ color: "var(--foreground)" }}>ResearchOS</span>
@@ -209,24 +227,14 @@ export default function ChatPage() {
             title="New Chat"
             className="w-7 h-7 rounded-lg flex items-center justify-center transition-all text-base leading-none"
             style={{ color: "var(--muted-foreground)", border: "1px solid var(--border)" }}
-            onMouseEnter={e => {
-              const el = e.currentTarget as HTMLElement
-              el.style.background = "rgba(79,142,247,0.15)"
-              el.style.color = "#4f8ef7"
-              el.style.borderColor = "rgba(79,142,247,0.4)"
-            }}
-            onMouseLeave={e => {
-              const el = e.currentTarget as HTMLElement
-              el.style.background = ""
-              el.style.color = "var(--muted-foreground)"
-              el.style.borderColor = "var(--border)"
-            }}
+            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = "rgba(204,107,69,0.15)"; el.style.color = "#e8845a"; el.style.borderColor = "rgba(204,107,69,0.4)" }}
+            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = ""; el.style.color = "var(--muted-foreground)"; el.style.borderColor = "var(--border)" }}
           >
             +
           </button>
         </div>
 
-        {/* Chat history list */}
+        {/* Chat history */}
         <div className="flex-1 overflow-y-auto py-3">
           {sessions.length === 0 ? (
             <p className="px-4 text-xs" style={{ color: "var(--muted-foreground)" }}>No chats yet</p>
@@ -242,19 +250,15 @@ export default function ChatPage() {
                     <button
                       key={s.session_id}
                       onClick={() => loadSession(s.session_id)}
-                      className="text-left px-3 py-2.5 rounded-lg text-xs transition-all duration-150 w-full"
+                      className="text-left px-3 py-2.5 rounded-xl text-xs transition-all duration-150 w-full"
                       style={active ? {
-                        background: "rgba(79,142,247,0.15)",
-                        border: "1px solid rgba(79,142,247,0.2)",
+                        background: "rgba(204,107,69,0.15)",
+                        border: "1px solid rgba(204,107,69,0.2)",
                       } : { border: "1px solid transparent" }}
-                      onMouseEnter={e => {
-                        if (!active) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)"
-                      }}
-                      onMouseLeave={e => {
-                        if (!active) (e.currentTarget as HTMLElement).style.background = ""
-                      }}
+                      onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)" }}
+                      onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.background = "" }}
                     >
-                      <p className="truncate leading-tight font-medium" style={{ color: active ? "#4f8ef7" : "var(--foreground)" }}>
+                      <p className="truncate leading-tight font-medium" style={{ color: active ? "#e8845a" : "var(--foreground)" }}>
                         {s.preview || "Empty chat"}
                       </p>
                       <p className="mt-0.5" style={{ color: "var(--muted-foreground)" }}>
@@ -268,23 +272,46 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Bottom actions */}
-        <div className="px-3 pb-4 pt-3" style={{ borderTop: "1px solid var(--sidebar-border)" }}>
+        {/* Bottom: upload + user + logout */}
+        <div className="px-3 pb-4 pt-3 space-y-1" style={{ borderTop: "1px solid var(--sidebar-border)" }}>
           <Link href="/ingest" className="block">
             <button
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-all duration-150"
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all duration-150"
               style={{ color: "var(--sidebar-foreground)" }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)" }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.05)" }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "" }}
             >
-              <span className="text-lg leading-none" style={{ color: "#4f8ef7" }}>+</span>
+              <span className="text-base leading-none" style={{ color: "#e8845a" }}>↑</span>
               Upload Document
             </button>
           </Link>
+
+          {/* User row */}
+          <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl mt-1" style={{ background: "rgba(204,107,69,0.06)", border: "1px solid rgba(204,107,69,0.1)" }}>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0"
+              style={{ background: "linear-gradient(135deg, #cc6b45, #e8845a)" }}>
+              {user?.name.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium truncate" style={{ color: "var(--foreground)" }}>{user?.name}</p>
+              <p className="text-[10px] truncate" style={{ color: "var(--muted-foreground)" }}>{user?.email}</p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition-all"
+            style={{ color: "var(--muted-foreground)" }}
+            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = "rgba(248,113,113,0.08)"; el.style.color = "#f87171" }}
+            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = ""; el.style.color = "var(--muted-foreground)" }}
+          >
+            <span className="text-sm leading-none">→</span>
+            Sign out
+          </button>
         </div>
       </aside>
 
-      {/* ── Main Content ── */}
+      {/* Main */}
       <div className="flex flex-col flex-1 min-w-0">
 
         {/* Header */}
@@ -292,7 +319,7 @@ export default function ChatPage() {
           <select
             value={domain}
             onChange={e => setDomain(e.target.value)}
-            className="text-sm rounded-lg px-3 py-1.5 outline-none cursor-pointer"
+            className="text-sm rounded-xl px-3 py-1.5 outline-none cursor-pointer"
             style={{ background: "var(--card)", border: "1px solid var(--border)", color: "var(--foreground)" }}
           >
             {DOMAINS.map(d => (
@@ -300,8 +327,8 @@ export default function ChatPage() {
             ))}
           </select>
           {sessionId && (
-            <span className="ml-auto text-xs font-mono" style={{ color: "var(--muted-foreground)", opacity: 0.4 }}>
-              #{sessionId}
+            <span className="ml-auto text-xs font-mono opacity-30" style={{ color: "var(--muted-foreground)" }}>
+              #{sessionId.slice(-8)}
             </span>
           )}
         </div>
@@ -313,7 +340,7 @@ export default function ChatPage() {
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center min-h-[55vh] text-center select-none">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 text-2xl font-bold text-white"
-                  style={{ background: "linear-gradient(135deg, #4f8ef7 0%, #7c5df7 100%)" }}>
+                  style={{ background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)", boxShadow: "0 8px 40px rgba(204,107,69,0.3)" }}>
                   R
                 </div>
                 <h1 className="text-2xl font-semibold mb-2" style={{ color: "var(--foreground)" }}>
@@ -329,14 +356,8 @@ export default function ChatPage() {
                       onClick={() => handleSubmit(q)}
                       className="text-left p-4 rounded-xl text-sm leading-relaxed transition-all duration-150"
                       style={{ background: "var(--card)", border: "1px solid var(--border)", color: "var(--sidebar-foreground)" }}
-                      onMouseEnter={e => {
-                        (e.currentTarget as HTMLElement).style.borderColor = "rgba(79,142,247,0.4)"
-                        ;(e.currentTarget as HTMLElement).style.color = "var(--foreground)"
-                      }}
-                      onMouseLeave={e => {
-                        (e.currentTarget as HTMLElement).style.borderColor = "var(--border)"
-                        ;(e.currentTarget as HTMLElement).style.color = "var(--sidebar-foreground)"
-                      }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(204,107,69,0.4)"; (e.currentTarget as HTMLElement).style.color = "var(--foreground)" }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--border)"; (e.currentTarget as HTMLElement).style.color = "var(--sidebar-foreground)" }}
                     >
                       {q}
                     </button>
@@ -346,19 +367,19 @@ export default function ChatPage() {
             )}
 
             {messages.map((msg, i) => (
-              <div key={i}>
+              <div key={`${msg.role}-${i}-${msg.content.slice(0, 12)}`}>
                 {msg.role === "user" ? (
                   <div className="flex justify-end">
                     <div className="max-w-[80%] px-4 py-3 rounded-2xl rounded-tr-sm text-base leading-relaxed text-white"
-                      style={{ background: "linear-gradient(135deg, #4f8ef7 0%, #3a7aec 100%)" }}>
+                      style={{ background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)" }}>
                       {msg.content}
                     </div>
                   </div>
                 ) : (
                   <div className="space-y-4">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0"
-                        style={{ background: "linear-gradient(135deg, #4f8ef7 0%, #7c5df7 100%)" }}>
+                      <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold text-white shrink-0"
+                        style={{ background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)" }}>
                         AI
                       </div>
                       <span className="text-sm font-medium" style={{ color: "var(--muted-foreground)" }}>ResearchOS</span>
@@ -385,12 +406,12 @@ export default function ChatPage() {
                             "--tw-prose-strong": "var(--foreground)",
                             "--tw-prose-bullets": "var(--muted-foreground)",
                             "--tw-prose-counters": "var(--muted-foreground)",
-                            "--tw-prose-links": "#4f8ef7",
-                            "--tw-prose-code": "#a5c8ff",
+                            "--tw-prose-links": "#e8845a",
+                            "--tw-prose-code": "#f0c4a8",
                             "--tw-prose-pre-bg": "var(--card)",
                             "--tw-prose-pre-code": "#c9d1d9",
                             "--tw-prose-quotes": "var(--muted-foreground)",
-                            "--tw-prose-quote-borders": "#4f8ef7",
+                            "--tw-prose-quote-borders": "#cc6b45",
                             "--tw-prose-hr": "var(--border)",
                           } as React.CSSProperties}
                         >
@@ -404,7 +425,7 @@ export default function ChatPage() {
                         {[0, 150, 300].map(delay => (
                           <span key={delay}
                             className="w-2 h-2 rounded-full animate-bounce"
-                            style={{ background: "var(--muted-foreground)", animationDelay: `${delay}ms` }}
+                            style={{ background: "#cc6b45", animationDelay: `${delay}ms` }}
                           />
                         ))}
                       </div>
@@ -414,13 +435,13 @@ export default function ChatPage() {
                       <div className="pl-10 flex flex-wrap gap-2 pt-1">
                         {msg.pipeline.methods.map(m => (
                           <span key={m} className="text-xs px-2.5 py-1 rounded-full font-medium"
-                            style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "1px solid var(--border)" }}>
+                            style={{ background: "rgba(204,107,69,0.08)", color: "#e8845a", border: "1px solid rgba(204,107,69,0.15)" }}>
                             {m}
                           </span>
                         ))}
                         {msg.pipeline.reranked && (
                           <span className="text-xs px-2.5 py-1 rounded-full font-medium"
-                            style={{ background: "var(--secondary)", color: "var(--muted-foreground)", border: "1px solid var(--border)" }}>
+                            style={{ background: "rgba(204,107,69,0.08)", color: "#e8845a", border: "1px solid rgba(204,107,69,0.15)" }}>
                             RRF Fusion
                           </span>
                         )}
@@ -433,7 +454,7 @@ export default function ChatPage() {
                           onClick={() => toggleSources(i)}
                           className="flex items-center gap-2 text-sm mb-3 transition-colors"
                           style={{ color: "var(--muted-foreground)" }}
-                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "var(--foreground)" }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#e8845a" }}
                           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "var(--muted-foreground)" }}
                         >
                           <span className="text-xs">{showSources[i] ? "▾" : "▸"}</span>
@@ -449,11 +470,11 @@ export default function ChatPage() {
                                 <div key={si} style={{ borderTop: si > 0 ? "1px solid var(--border)" : undefined }}>
                                   <div
                                     className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer transition-all"
-                                    style={{ background: isExpanded ? "rgba(79,142,247,0.06)" : si % 2 === 0 ? "var(--card)" : "transparent" }}
+                                    style={{ background: isExpanded ? "rgba(204,107,69,0.06)" : si % 2 === 0 ? "var(--card)" : "transparent" }}
                                     onClick={() => setExpandedChunk(isExpanded ? null : chunkKey)}
                                   >
                                     <span className="font-mono text-xs shrink-0 w-7 text-center px-1 py-0.5 rounded"
-                                      style={{ background: "rgba(79,142,247,0.15)", color: "#4f8ef7" }}>
+                                      style={{ background: "rgba(204,107,69,0.15)", color: "#e8845a" }}>
                                       [{si + 1}]
                                     </span>
                                     <span className="flex-1 truncate font-medium" style={{ color: "var(--foreground)" }}>
@@ -501,7 +522,7 @@ export default function ChatPage() {
 
             {error && (
               <div className="rounded-xl px-4 py-3.5 text-sm"
-                style={{ background: "rgba(229,87,87,0.1)", border: "1px solid rgba(229,87,87,0.25)", color: "#e57373" }}>
+                style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", color: "#f87171" }}>
                 {error}
               </div>
             )}
@@ -513,8 +534,7 @@ export default function ChatPage() {
         {/* Rate limit banner */}
         {rateLimitSeconds !== null && (
           <div className="shrink-0 mx-4 mt-3 px-4 py-3 rounded-xl flex items-center gap-3 text-sm"
-            style={{ background: "rgba(251,191,36,0.1)", border: "1px solid rgba(251,191,36,0.25)" }}>
-            <span className="text-lg">⏳</span>
+            style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
             <div>
               <span style={{ color: "#fbbf24", fontWeight: 600 }}>Rate limit reached</span>
               <span style={{ color: "var(--muted-foreground)" }}> — Only 2 queries allowed per 20 minutes.</span>
@@ -529,7 +549,7 @@ export default function ChatPage() {
         <div className="shrink-0 px-4 py-4" style={{ borderTop: "1px solid var(--border)", background: "var(--sidebar)" }}>
           <div className="max-w-3xl mx-auto">
             <div className="flex gap-3 items-end px-4 py-3 rounded-2xl"
-              style={{ background: "var(--card)", border: "1px solid var(--border)", boxShadow: "0 4px 24px rgba(0,0,0,0.3)" }}
+              style={{ background: "var(--card)", border: "1px solid var(--border)", boxShadow: "0 4px 32px rgba(0,0,0,0.4)" }}
             >
               <textarea
                 ref={textareaRef}
@@ -557,8 +577,8 @@ export default function ChatPage() {
                 style={loading || !input.trim() ? {
                   background: "var(--secondary)", color: "var(--muted-foreground)", cursor: "not-allowed",
                 } : {
-                  background: "linear-gradient(135deg, #4f8ef7 0%, #3a7aec 100%)",
-                  boxShadow: "0 2px 8px rgba(79,142,247,0.4)",
+                  background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)",
+                  boxShadow: "0 2px 12px rgba(204,107,69,0.45)",
                 }}
               >
                 {loading ? (
@@ -566,7 +586,7 @@ export default function ChatPage() {
                 ) : "↑"}
               </button>
             </div>
-            <p className="text-xs text-center mt-2" style={{ color: "var(--muted-foreground)", opacity: 0.5 }}>
+            <p className="text-xs text-center mt-2 opacity-40" style={{ color: "var(--muted-foreground)" }}>
               Enter to send · Shift+Enter for new line
             </p>
           </div>
@@ -575,3 +595,6 @@ export default function ChatPage() {
     </div>
   )
 }
+
+
+

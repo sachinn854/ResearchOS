@@ -40,6 +40,11 @@ services:
         value: researchos_chunks
       - key: APP_ENV
         value: production
+      # WEB SERVICE — signs the JWTs. generateValue lets Render create a strong random value on
+      # first deploy so it is never in this file or in git. Rotating it signs
+      # every user out, which is the intended behaviour for a leaked key.
+      - key: JWT_SECRET_KEY
+        generateValue: true
 
   - type: web
     name: researchos-frontend
@@ -59,7 +64,18 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     plan: free
-    startCommand: celery -A backend.workers.celery_app worker --loglevel=info -P solo
+    # -Q lists the queues this worker consumes. Naming both is important: a worker
+    # started without -Q takes the default queue only, so `background` tasks would
+    # queue up and never run.
+    #
+    # Locally (docker-compose.yml) we run one worker per queue, which fully
+    # isolates them. Render's free plan only allows so many services, so here a
+    # single worker consumes both. That still helps: Celery rotates between the
+    # listed queues, so a user's upload waits behind roughly one background job
+    # instead of all five that a web-search fallback can enqueue at once. To get
+    # full isolation on a paid plan, duplicate this service and give one `-Q
+    # ingest` and the other `-Q background`.
+    startCommand: celery -A backend.workers.celery_app worker --loglevel=info -P solo -Q ingest,background
     envVars:
       - key: POSTGRES_URL
         fromDatabase:
@@ -77,3 +93,9 @@ services:
         value: researchos_chunks
       - key: APP_ENV
         value: production
+      # WORKER — never issues or verifies a token, but backend/core/config.py
+      # validates every setting at import time, so it needs *a* value to boot.
+      # Intentionally not the web service's secret: this process has no reason to
+      # be able to mint tokens.
+      - key: JWT_SECRET_KEY
+        generateValue: true

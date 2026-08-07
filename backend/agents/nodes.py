@@ -26,51 +26,13 @@ if settings.langfuse_public_key and settings.langfuse_secret_key:
     )
     log.info("Langfuse tracing enabled")
 
-
-def decomposer_node(state: AgentState) -> dict:
-    """Break a complex query into 2-3 focused sub-questions.
-
-    Simple queries pass through unchanged (sub_queries stays empty).
-    Complex queries get decomposed so each sub-query can retrieve
-    its own focused set of chunks.
-    """
-    query = state["query"]
-    log.info("[decomposer] checking if query needs decomposition...")
-
-    prompt = f"""You are a query decomposer for a research assistant.
-Decide if this query is complex enough to split into sub-questions.
-
-Query: {query}
-
-Rules:
-- If simple (single concept) → return {{"decompose": false, "sub_queries": []}}
-- If complex (multiple concepts / comparison / multi-part) → return {{"decompose": true, "sub_queries": ["q1", "q2", "q3"]}}
-- Max 3 sub-queries, each focused and standalone
-- Return ONLY valid JSON"""
-
-    try:
-        response = _llm.chat.completions.create(**provider_kwargs(),
-            model=settings.llm_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=200,
-        )
-        data = json.loads(response.choices[0].message.content)
-        if data.get("decompose") and data.get("sub_queries"):
-            sub_queries = data["sub_queries"][:3]
-            log.info("[decomposer] decomposed into %d sub-queries: %s", len(sub_queries), sub_queries)
-            return {"sub_queries": sub_queries}
-    except (json.JSONDecodeError, Exception) as exc:
-        log.debug("[decomposer] failed, passing through: %s", exc)
-
-    log.info("[decomposer] query is simple — no decomposition")
-    return {"sub_queries": []}
+# BUG-033: decomposer_node removed — planner_node already handles decomposition
 
 
 async def retriever_node(state: AgentState) -> dict:
     """Retrieve relevant chunks using hybrid retrieval.
 
-    If sub_queries are present (from decomposer), runs retrieval for each
+    If sub_queries are present (from planner), runs retrieval for each
     sub-query and merges results before returning.
     """
     sub_queries = state.get("sub_queries") or []
@@ -90,7 +52,9 @@ async def retriever_node(state: AgentState) -> dict:
                     seen_keys.add(key)
                     merged.append(c)
 
-        merged = sorted(merged, key=lambda c: c.score, reverse=True)[:5]
+        # BUG-027: was [:5] — keep more results proportional to sub-query count
+        keep = min(5 * len(sub_queries), 15)
+        merged = sorted(merged, key=lambda c: c.score, reverse=True)[:keep]
         log.info("[retriever] merged %d unique chunks from sub-queries", len(merged))
         return {"chunks": merged}
 
@@ -103,12 +67,7 @@ async def retriever_node(state: AgentState) -> dict:
 
 
 def web_search_node(state: AgentState) -> dict:
-    """Fetch web results when KB has no relevant content.
-
-    Web results are used as context for the current query.
-    Background ingestion into KB happens via Celery (fire-and-forget)
-    so the next query on the same topic gets a direct KB hit.
-    """
+    """Fetch web results when KB has no relevant content."""
     log.info("[web_search] KB had no relevant chunks — searching web...")
     results = search_web(state["query"], max_results=5)
 
@@ -116,7 +75,6 @@ def web_search_node(state: AgentState) -> dict:
         log.info("[web_search] no web results found either")
         return {"chunks": [], "web_search_used": True, "web_sources": []}
 
-    # Convert web results into fake chunk objects so generator can use them
     from backend.retrieval.dense_retriever import RetrievedChunk
     web_chunks = [
         RetrievedChunk(
@@ -134,7 +92,6 @@ def web_search_node(state: AgentState) -> dict:
     web_sources = [{"title": r["title"], "url": r["url"]} for r in results]
     log.info("[web_search] using %d web results as context", len(web_chunks))
 
-    # Fire-and-forget: ingest web content into KB in background
     _trigger_background_ingest(results, domain=state.get("domain"))
 
     return {
@@ -146,7 +103,6 @@ def web_search_node(state: AgentState) -> dict:
 
 
 def _trigger_background_ingest(results: list[dict], domain: str | None) -> None:
-    """Queue web content for KB ingestion via Celery."""
     try:
         from backend.workers.tasks import ingest_text_task
         for r in results:
@@ -181,24 +137,25 @@ Retrieved chunks:
 Reply with JSON only — no explanation:
 {{"relevant": true}} or {{"relevant": false}}"""
 
-    response = _llm.chat.completions.create(**provider_kwargs(),
-        model=settings.llm_model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
-    )
-
+    # BUG-005: wrap LLM call in try/except — 429/500 must not crash the entire graph
     try:
+        response = _llm.chat.completions.create(**provider_kwargs(),
+            model=settings.fast_llm_model,  # BUG-034: classification uses fast model
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=10,
+        )
         data = json.loads(response.choices[0].message.content)
         is_relevant = bool(data.get("relevant", True))
         log.info("[grader] decision: %s", "relevant" if is_relevant else "NOT relevant")
         return {"is_relevant": is_relevant}
-    except (json.JSONDecodeError, AttributeError):
-        log.info("[grader] parse failed — defaulting to relevant")
+    except Exception as exc:
+        log.warning("[grader] failed (defaulting to relevant): %s", exc)
         return {"is_relevant": True}
 
 
 def generator_node(state: AgentState) -> dict:
-    """Assemble context and generate an answer using Groq."""
+    """Assemble context and generate an answer via OpenRouter."""
     log.info("[generator] generating answer from %d chunks...", len(state["chunks"]))
     context = _assembler.assemble(state["chunks"])
     prompt = build_report_prompt(
@@ -245,12 +202,8 @@ def generator_node(state: AgentState) -> dict:
     return {"answer": answer, "context": context, "sources": sources}
 
 
-def stream_generator_node(state: AgentState) -> Generator[str, None, dict]:
-    """Streaming version of generator — yields tokens as they arrive from Groq.
-
-    Yields raw token strings. The caller is responsible for collecting them
-    into the final answer and updating state.
-    """
+def stream_generator_node(state: AgentState) -> Generator[str, None, None]:
+    """Streaming version of generator — yields tokens as they arrive via OpenRouter."""
     log.info("[generator:stream] starting for %d chunks...", len(state["chunks"]))
     context = _assembler.assemble(state["chunks"])
     prompt = build_report_prompt(
@@ -269,6 +222,9 @@ def stream_generator_node(state: AgentState) -> Generator[str, None, dict]:
     )
 
     for chunk in stream:
+        # BUG-006: OpenRouter can return chunks with empty choices list → IndexError
+        if not chunk.choices:
+            continue
         token = chunk.choices[0].delta.content or ""
         if token:
             yield token
@@ -280,7 +236,6 @@ def planner_node(state: AgentState) -> dict:
     """High-level planning — decide approach before retrieval starts.
 
     Outputs a plan dict and sets sub_queries if the query is complex.
-    This replaces the need for a separate decomposer node.
     """
     query = state["query"]
     log.info("[planner] analyzing query...")
@@ -320,21 +275,17 @@ Rules for sub_queries:
 
 
 def contradiction_detector_node(state: AgentState) -> dict:
-    """Detect contradictions between retrieved chunks before generation.
-
-    If contradictions are found they are appended to the context so the
-    generator can acknowledge them in the answer.
-    """
+    """Detect contradictions between retrieved chunks before generation."""
     chunks = state["chunks"]
     log.info("[contradiction_detector] checking %d chunks for contradictions...", len(chunks))
 
     if len(chunks) < 2:
         return {"contradictions": []}
 
-    # Only compare top chunks to save LLM calls
+    # BUG-029: was chunks[:4] — include all top-5 chunks
     previews = "\n\n".join(
         f"[Chunk {i+1}]: {c.text[:400]}"
-        for i, c in enumerate(chunks[:4])
+        for i, c in enumerate(chunks[:5])
     )
 
     prompt = f"""You are a contradiction detector for a research assistant.
@@ -350,7 +301,7 @@ If no contradictions: {{"contradictions": []}}"""
 
     try:
         response = _llm.chat.completions.create(**provider_kwargs(),
-            model=settings.llm_model,
+            model=settings.fast_llm_model,  # BUG-034: use fast model for classification
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=300,
@@ -359,9 +310,6 @@ If no contradictions: {{"contradictions": []}}"""
         contradictions = data.get("contradictions", [])
         if contradictions:
             log.info("[contradiction_detector] found %d contradiction(s)", len(contradictions))
-            for c in contradictions:
-                log.info("  Chunk %s vs Chunk %s: %s",
-                         c.get("chunk_a"), c.get("chunk_b"), c.get("description", ""))
         else:
             log.info("[contradiction_detector] no contradictions found")
         return {"contradictions": contradictions}
@@ -371,11 +319,7 @@ If no contradictions: {{"contradictions": []}}"""
 
 
 def citation_verifier_node(state: AgentState) -> dict:
-    """Verify that citations in the generated answer are supported by the chunks.
-
-    Parses [1], [2] etc. from the answer and checks each cited fact
-    against the corresponding chunk text.
-    """
+    """Verify that citations in the generated answer are supported by the chunks."""
     import re
     answer = state.get("answer", "")
     chunks = state.get("chunks", [])
@@ -384,7 +328,6 @@ def citation_verifier_node(state: AgentState) -> dict:
     if not answer or not chunks:
         return {"citation_verified": True}
 
-    # Find cited chunk indices in the answer (e.g. [1], [2])
     cited = set(int(m) for m in re.findall(r'\[(\d+)\]', answer))
     if not cited:
         log.info("[citation_verifier] no citations found in answer")
@@ -400,7 +343,7 @@ def citation_verifier_node(state: AgentState) -> dict:
 
     prompt = f"""You are a citation verifier. Check if the answer's citations are supported by the source chunks.
 
-Answer: {answer[:800]}
+Answer: {answer[:3000]}
 
 Source chunks:
 {chunks_preview}
@@ -408,18 +351,18 @@ Source chunks:
 Reply with JSON only:
 {{"verified": true, "unverified": []}}
 or
-{{"verified": false, "unverified": [1, 3]}}  (list of citation numbers that are NOT supported)"""
+{{"verified": false, "unverified": [1, 3]}}"""
 
+    # BUG-028: was answer[:800] — check full answer (up to 3000 chars)
     try:
         response = _llm.chat.completions.create(**provider_kwargs(),
-            model=settings.llm_model,
+            model=settings.fast_llm_model,  # BUG-034: use fast model for classification
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
             max_tokens=150,
         )
         data = json.loads(response.choices[0].message.content)
         unverified = data.get("unverified", [])
-        verified = bool(data.get("verified", True))
 
         if unverified:
             warning = f"\n\n[Note: Citations {unverified} could not be fully verified against the source chunks.]"
@@ -447,17 +390,18 @@ Answer:
 Reply with JSON only — no explanation:
 {{"grounded": true}} or {{"grounded": false}}"""
 
-    response = _llm.chat.completions.create(**provider_kwargs(),
-        model=settings.llm_model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
-    )
-
+    # BUG-005: wrap LLM call in try/except — 429/500 must not crash after generation succeeded
     try:
+        response = _llm.chat.completions.create(**provider_kwargs(),
+            model=settings.llm_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+            max_tokens=10,
+        )
         data = json.loads(response.choices[0].message.content)
         has_hallucination = not bool(data.get("grounded", True))
         log.info("[hallucination_checker] result: %s", "HALLUCINATION DETECTED" if has_hallucination else "grounded")
         return {"has_hallucination": has_hallucination}
-    except (json.JSONDecodeError, AttributeError):
-        log.info("[hallucination_checker] parse failed — defaulting to grounded")
+    except Exception as exc:
+        log.warning("[hallucination_checker] failed (defaulting to grounded): %s", exc)
         return {"has_hallucination": False}

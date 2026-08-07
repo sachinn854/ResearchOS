@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 import os
@@ -18,10 +19,20 @@ from backend.ingestion.parsers.base import BaseParser
 from backend.ingestion.chunking.factory import get_chunker
 from backend.ingestion.embedding.embedding_service import EmbeddingService
 from backend.ingestion.cleaning.text_cleaner import clean_page_text, is_clean_chunk
-from backend.ingestion.graph.entity_extractor import extract_entities
+from backend.ingestion.graph.entity_extractor import extract_entities_for_chunks
 from sqlalchemy import select
 
 log = logging.getLogger("researchos.ingestion.pipeline")
+
+# BUG-013: singleton — fastembed model loaded once per process, not per request
+_embedder: EmbeddingService | None = None
+
+
+def _get_embedder() -> EmbeddingService:
+    global _embedder
+    if _embedder is None:
+        _embedder = EmbeddingService()
+    return _embedder
 
 
 def _detect_type(source: str) -> str:
@@ -76,53 +87,72 @@ async def ingest_document(
         )
         if existing:
             log.info("[pipeline] duplicate detected (hash=%s) — skipping | id=%s", file_hash[:12], existing.id)
+            # BUG-025: update title if it changed on re-upload
+            if existing.title != title:
+                existing.title = title
+                await db.commit()
             return existing
 
     parser = _get_parser(doc_type)
     chunker = get_chunker(doc_type)
-    embedder = EmbeddingService()
+    embedder = _get_embedder()  # BUG-013: singleton
 
     # Step 1: Parse
-    log.info("[pipeline] step 1/7 — parsing...")
+    log.info("[pipeline] step 1/8 — parsing...")
     pages = parser.parse(source)
     log.info("[pipeline] parsed %d pages", len(pages))
 
     # Step 2: Clean pages (remove noise before chunking)
-    log.info("[pipeline] step 2/7 — cleaning %d pages...", len(pages))
+    log.info("[pipeline] step 2/8 — cleaning %d pages...", len(pages))
     for page in pages:
         page.text = clean_page_text(page.text)
     pages = [p for p in pages if p.text.strip()]
     log.info("[pipeline] %d pages remain after cleaning", len(pages))
 
     # Step 3: Chunk
-    log.info("[pipeline] step 3/7 — chunking...")
+    log.info("[pipeline] step 3/8 — chunking...")
     text_chunks = chunker.chunk(pages)
     raw_count = len(text_chunks)
 
     # Step 4: Filter low-quality chunks
-    log.info("[pipeline] step 4/7 — filtering chunks...")
+    log.info("[pipeline] step 4/8 — filtering chunks...")
     text_chunks = [c for c in text_chunks if is_clean_chunk(c.text)]
     log.info("[pipeline] kept %d/%d chunks after filter", len(text_chunks), raw_count)
 
-    # Step 5: Embed
-    log.info("[pipeline] step 5/7 — embedding %d chunks...", len(text_chunks))
-    vectors = embedder.embed([c.text for c in text_chunks])
-    log.info("[pipeline] embedded %d vectors (dim=%d)", len(vectors), len(vectors[0]) if vectors else 0)
+    # BUG-003: empty chunk list means the document had no extractable text (e.g. scanned PDF)
+    if not text_chunks:
+        log.warning("[pipeline] no usable chunks extracted — document will be marked failed | source=%s", source)
+        doc = Document(title=title, source_path=source, domain=domain, status="failed", file_hash=file_hash)
+        db.add(doc)
+        await db.commit()
+        await db.refresh(doc)
+        return doc
 
-    # Step 6: Save Document row
-    log.info("[pipeline] step 6/7 — saving to Postgres...")
+    # Step 5: Embed
+    log.info("[pipeline] step 5/8 — embedding %d chunks...", len(text_chunks))
+    vectors = embedder.embed([c.text for c in text_chunks])
+    log.info("[pipeline] embedded %d vectors (dim=%d)", len(vectors), len(vectors[0]))
+
+    # Step 6: Entities for the graph retrieval signal.
+    # BUG-014: this used to sit inside the loop below as a blocking, one-call-
+    # per-chunk operation. Now it is one batched, concurrent, off-the-event-loop
+    # pass that returns a list parallel to text_chunks.
+    log.info("[pipeline] step 6/8 — extracting entities...")
+    entities_per_chunk = await extract_entities_for_chunks([c.text for c in text_chunks])
+
+    # Step 7: Save Document row + chunks to Postgres first
+    log.info("[pipeline] step 7/8 — saving to Postgres...")
     doc = Document(title=title, source_path=source, domain=domain, status="processing", file_hash=file_hash)
     db.add(doc)
     await db.flush()
     log.info("[pipeline] document saved | id=%s", doc.id)
 
-    # Step 7: Build Qdrant points and Postgres chunk rows
+    # Step 8: Build Qdrant points and Postgres chunk rows
     qdrant_points: list[PointStruct] = []
     db_chunks: list[Chunk] = []
 
-    for chunk, vector in zip(text_chunks, vectors):
+    for chunk, vector, entities in zip(text_chunks, vectors, entities_per_chunk):
         qdrant_id = str(uuid.uuid4())
-        entities = extract_entities(chunk.text)
 
         qdrant_points.append(PointStruct(
             id=qdrant_id,
@@ -147,19 +177,27 @@ async def ingest_document(
             qdrant_id=qdrant_id,
         ))
 
-    # Step 7a: Upsert vectors into Qdrant
-    log.info("[pipeline] step 7/7 — storing %d vectors in Qdrant...", len(qdrant_points))
-    qdrant_client.upsert(
-        collection_name=settings.qdrant_collection,
-        points=qdrant_points,
-    )
-
-    # Step 7b: Bulk insert chunks
-    log.info("[pipeline] storing %d chunks in Postgres...", len(db_chunks))
+    # BUG-004: commit Postgres FIRST — if Qdrant fails after, we can mark doc failed.
+    # Previous order (Qdrant first, Postgres second) left orphan vectors on Postgres failure.
+    log.info("[pipeline] step 8/8 — committing %d chunks to Postgres...", len(db_chunks))
     db.add_all(db_chunks)
     doc.status = "completed"
     await db.commit()
     await db.refresh(doc)
+
+    # BUG-015: Qdrant upsert is synchronous — wrap in thread to avoid blocking the event loop
+    log.info("[pipeline] upserting %d vectors to Qdrant...", len(qdrant_points))
+    try:
+        await asyncio.to_thread(
+            qdrant_client.upsert,
+            collection_name=settings.qdrant_collection,
+            points=qdrant_points,
+        )
+    except Exception as exc:
+        log.error("[pipeline] Qdrant upsert failed — marking document as failed | id=%s | error=%s", doc.id, exc)
+        doc.status = "failed"
+        await db.commit()
+        return doc
 
     log.info("[pipeline] done | id=%s | chunks=%d | status=%s", doc.id, len(db_chunks), doc.status)
     return doc

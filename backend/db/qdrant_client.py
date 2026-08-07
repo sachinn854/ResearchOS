@@ -3,7 +3,7 @@ from qdrant_client.models import Distance, VectorParams
 from backend.core.config import settings
 
 
-client = QdrantClient(url=settings.qdrant_url)
+client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
 
 
 def init_collection():

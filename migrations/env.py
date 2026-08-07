@@ -8,7 +8,7 @@ sys.path.append(os.getcwd())
 
 from backend.core.config import settings
 from backend.db.postgres import Base
-from backend.db.models import document, chunk  # noqa: F401 — models must be imported so Base sees them
+from backend.db.models import document, chunk, conversation, user  # noqa: F401 — models must be imported so Base sees them
 
 config = context.config
 

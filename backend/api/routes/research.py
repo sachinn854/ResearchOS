@@ -18,6 +18,23 @@ from backend.retrieval.hybrid_retriever import HybridRetriever
 from backend.retrieval.context_assembler import ContextAssembler
 from backend.retrieval.dense_retriever import RetrievedChunk
 from backend.retrieval.web_searcher import search_web
+from backend.api.schemas.research import (
+    AsyncIngestResponse,
+    IngestRequest,
+    IngestResponse,
+    QueryRequest,
+    QueryResponse,
+    SourceItem,
+    TaskStatusResponse,
+)
+from backend.db.models.document import Document
+from backend.db.postgres import get_db
+from backend.api.dependencies.auth import get_current_user
+from backend.api.middleware.rate_limit import check_rate_limit
+from backend.db.models.user import User
+from backend.ingestion.pipeline import ingest_document
+from backend.memory.conversation_store import load_history, save_exchange
+from backend.workers.celery_app import celery_app
 
 _retriever = HybridRetriever()
 _stream_retriever = HybridRetriever(use_hyde=False, use_graph=False)
@@ -33,6 +50,18 @@ _DOMAIN_LABELS = {
     "finance": "Finance",
     "math": "Mathematics",
 }
+
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # BUG-010: 50 MB hard limit
+
+router = APIRouter(prefix="/research", tags=["research"])
+
+
+def _get_client_ip(req: Request) -> str:
+    """BUG-007: extract real client IP — check X-Forwarded-For first for reverse-proxy setups."""
+    xff = req.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return req.client.host if req.client else "unknown"
 
 
 def _check_domain_sync(query: str, domain_label: str) -> bool:
@@ -52,28 +81,21 @@ def _check_domain_sync(query: str, domain_label: str) -> bool:
     )
     answer = resp.choices[0].message.content.strip().lower()
     return answer.startswith("yes")
-from backend.api.schemas.research import (
-    AsyncIngestResponse,
-    IngestRequest,
-    IngestResponse,
-    QueryRequest,
-    QueryResponse,
-    SourceItem,
-    TaskStatusResponse,
-)
-from backend.db.models.document import Document
-from backend.db.postgres import get_db
-from backend.api.middleware.rate_limit import check_rate_limit
-from backend.ingestion.pipeline import ingest_document
-from backend.memory.conversation_store import load_history, save_exchange
-from backend.workers.celery_app import celery_app
-
-router = APIRouter(prefix="/research", tags=["research"])
 
 
 @router.get("/sessions")
-async def list_sessions(user_id: str, db: AsyncSession = Depends(get_db)):
-    """Return the last 30 sessions belonging to this user (filtered by user_id prefix)."""
+async def list_sessions(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the last 30 sessions belonging to the signed-in user.
+
+    This endpoint used to take `user_id` as a query parameter and match it
+    against the session_id prefix. That meant anyone could pass someone else's
+    id and read their entire chat history — the check was against a value the
+    caller supplied. Now the id comes from the verified token and is matched
+    against a real foreign key column.
+    """
     result = await db.execute(text("""
         SELECT
             ch.session_id,
@@ -85,11 +107,11 @@ async def list_sessions(user_id: str, db: AsyncSession = Depends(get_db)):
             MAX(ch.created_at) AS last_at,
             COUNT(*) AS message_count
         FROM conversation_history ch
-        WHERE ch.session_id LIKE :prefix
+        WHERE ch.user_id = :user_id
         GROUP BY ch.session_id
         ORDER BY last_at DESC
         LIMIT 30
-    """), {"prefix": f"{user_id}_%"})
+    """), {"user_id": current_user.id})
     rows = result.fetchall()
     return [
         {
@@ -103,17 +125,35 @@ async def list_sessions(user_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/sessions/{session_id}/messages")
-async def get_session_messages(session_id: str, db: AsyncSession = Depends(get_db)):
-    """Return all messages for a session in chronological order."""
+async def get_session_messages(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return all messages for a session in chronological order.
+
+    BUG-011 originally added an ownership check here, but it compared the
+    session_id prefix against a client-supplied user_id, so it could be
+    satisfied by simply sending the matching id. Ownership is now filtered in
+    the query itself using the token's user id, which means there is no check to
+    bypass — a session that is not yours returns nothing.
+    """
     result = await db.execute(
         text("""
             SELECT role, content FROM conversation_history
-            WHERE session_id = :session_id
+            WHERE session_id = :session_id AND user_id = :user_id
             ORDER BY created_at ASC
         """),
-        {"session_id": session_id},
+        {"session_id": session_id, "user_id": current_user.id},
     )
     rows = result.fetchall()
+
+    if not rows:
+        # Either the session does not exist or it belongs to someone else. Same
+        # answer for both — distinguishing them would confirm that a session id
+        # exists, which is exactly what someone guessing ids wants to know.
+        raise HTTPException(status_code=404, detail="Session not found")
+
     return [{"role": r.role, "content": r.content} for r in rows]
 
 
@@ -122,15 +162,27 @@ async def upload_file(
     file: UploadFile = File(...),
     title: str = Form(...),
     domain: str = Form(default="ml"),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload a PDF (or any file) directly — saved locally then ingested through the full pipeline."""
+    """Upload a file and run the full ingestion pipeline."""
     upload_dir = Path("data/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    safe_name = Path(file.filename).name if file.filename else "upload.pdf"
+    content = await file.read()
+
+    # BUG-010: reject oversized files before writing to disk
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {MAX_UPLOAD_BYTES // (1024*1024)}MB.",
+        )
+
+    # BUG-009: UUID prefix prevents filename collisions between users
+    original_name = Path(file.filename).name if file.filename else "upload"
+    safe_name = f"{uuid.uuid4()}_{original_name}"
     file_path = upload_dir / safe_name
-    file_path.write_bytes(await file.read())
+    file_path.write_bytes(content)
 
     doc = await ingest_document(
         source=str(file_path),
@@ -142,7 +194,11 @@ async def upload_file(
 
 
 @router.post("/ingest", response_model=IngestResponse)
-async def ingest(request: IngestRequest, db: AsyncSession = Depends(get_db)):
+async def ingest(
+    request: IngestRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Synchronous ingest — waits until complete. Good for small files."""
     doc = await ingest_document(
         source=request.source,
@@ -154,7 +210,10 @@ async def ingest(request: IngestRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/ingest/async", response_model=AsyncIngestResponse)
-async def ingest_async(request: IngestRequest):
+async def ingest_async(
+    request: IngestRequest,
+    current_user: User = Depends(get_current_user),
+):
     """Async ingest — queues a background task and returns immediately."""
     from backend.workers.tasks import ingest_document_task
 
@@ -171,8 +230,16 @@ async def ingest_async(request: IngestRequest):
 
 
 @router.get("/tasks/{task_id}", response_model=TaskStatusResponse)
-async def get_task_status(task_id: str):
-    """Check the status of a background ingestion task."""
+async def get_task_status(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Check the status of a background ingestion task.
+
+    Note: this only requires *a* signed-in user, not the one who queued the task.
+    Celery task ids are unguessable UUIDs and the payload is just a status
+    string, so we do not track task ownership.
+    """
     result = AsyncResult(task_id, app=celery_app)
 
     match result.state:
@@ -189,11 +256,16 @@ async def get_task_status(task_id: str):
 
 
 @router.post("/query/stream")
-async def query_stream(request: QueryRequest, req: Request, db: AsyncSession = Depends(get_db)):
+async def query_stream(
+    request: QueryRequest,
+    req: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Streaming query — tokens arrive in real-time via Server-Sent Events."""
 
-    # Rate limiting — 2 requests per IP per 20 minutes
-    client_ip = req.client.host if req.client else "unknown"
+    # BUG-007: use real client IP (X-Forwarded-For) not proxy IP
+    client_ip = _get_client_ip(req)
     allowed, retry_after = check_rate_limit(client_ip)
     if not allowed:
         raise HTTPException(
@@ -201,14 +273,12 @@ async def query_stream(request: QueryRequest, req: Request, db: AsyncSession = D
             detail={"error": "rate_limit", "retry_after": retry_after},
         )
 
-    conversation_history = []
-    if request.session_id:
-        conversation_history = await load_history(request.session_id, db)
-
-    # Domain guard — fast binary check before retrieval
+    # BUG-040: domain check BEFORE loading conversation history — off-domain
+    # queries return immediately without paying the DB round-trip
     if request.domain and request.domain != "all" and request.domain in _DOMAIN_LABELS:
         domain_label = _DOMAIN_LABELS[request.domain]
-        loop = asyncio.get_event_loop()
+        # BUG-018: get_running_loop() — get_event_loop() is deprecated in Python 3.10+
+        loop = asyncio.get_running_loop()
         is_on_domain = await loop.run_in_executor(
             _thread_pool, _check_domain_sync, request.query, domain_label
         )
@@ -222,7 +292,14 @@ async def query_stream(request: QueryRequest, req: Request, db: AsyncSession = D
                 yield "data: {\"type\": \"done\"}\n\n"
             return StreamingResponse(_refuse(), media_type="text/event-stream")
 
-    # Retrieval — fast path: no graph (~7s saved), HyDE parallel with sparse
+    # Load conversation history after domain check passes.
+    # user_id is passed so history can only be read back for this user's own
+    # sessions — a session id from someone else's chat returns nothing.
+    conversation_history = []
+    if request.session_id:
+        conversation_history = await load_history(request.session_id, db, user_id=current_user.id)
+
+    # Retrieval — fast path: no graph (~7s saved)
     chunks, best_dense_score = await _stream_retriever.retrieve(
         query=request.query,
         db=db,
@@ -230,14 +307,22 @@ async def query_stream(request: QueryRequest, req: Request, db: AsyncSession = D
         domain=request.domain,
     )
 
-    # Fetch document titles for source enrichment
+    # Fetch document titles — BUG-016: filter out non-UUID IDs (e.g. "web_0") before UUID()
     doc_id_set = list({c.document_id for c in chunks})
     doc_title_map: dict[str, str] = {}
     if doc_id_set:
         try:
-            uuids = [uuid.UUID(d) for d in doc_id_set]
-            rows = (await db.execute(select(Document.id, Document.title).where(Document.id.in_(uuids)))).all()
-            doc_title_map = {str(row.id): row.title for row in rows}
+            valid_uuids = []
+            for d in doc_id_set:
+                try:
+                    valid_uuids.append(uuid.UUID(d))
+                except ValueError:
+                    pass
+            if valid_uuids:
+                rows = (await db.execute(
+                    select(Document.id, Document.title).where(Document.id.in_(valid_uuids))
+                )).all()
+                doc_title_map = {str(row.id): row.title for row in rows}
         except Exception:
             pass
 
@@ -245,9 +330,6 @@ async def query_stream(request: QueryRequest, req: Request, db: AsyncSession = D
         active_chunks = chunks
         web_search_used = False
 
-        # Cosine similarity threshold — meaningful relevance signal
-        # BAAI/bge-small: > 0.45 = relevant, < 0.45 = KB miss → web fallback
-        # RRF scores (0.013-0.033) are rank-based, useless for this decision
         needs_web = not active_chunks or best_dense_score < 0.45
 
         if needs_web:
@@ -269,10 +351,11 @@ async def query_stream(request: QueryRequest, req: Request, db: AsyncSession = D
                 for i, r in enumerate(web_results[:5])
             ]
             web_search_used = True
-            doc_title_map.update({f"web_{i}": r.get("title", r.get("url", "Web Result")) for i, r in enumerate(web_results[:5])})
+            doc_title_map.update({
+                f"web_{i}": r.get("title", r.get("url", "Web Result"))
+                for i, r in enumerate(web_results[:5])
+            })
 
-            # Fire-and-forget: ingest web results into KB in background
-            # Wrapped in try-except — if Celery/Redis is down, stream must NOT crash
             try:
                 from backend.workers.tasks import ingest_text_task
                 for r in web_results:
@@ -307,10 +390,6 @@ async def query_stream(request: QueryRequest, req: Request, db: AsyncSession = D
             full_answer += token
             yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 
-        # Hallucination check skipped in stream path (saves ~6s after generation)
-        has_hallucination = False
-
-        # Send sources with paper titles + chunk text preview
         sources = [
             {
                 "document_id": c.document_id,
@@ -324,25 +403,25 @@ async def query_stream(request: QueryRequest, req: Request, db: AsyncSession = D
         ]
         yield f"data: {json.dumps({'type': 'sources', 'sources': sources, 'chunks_used': len(active_chunks)})}\n\n"
 
-        # Pipeline transparency event
-        methods = ["Web Search"] if web_search_used else ["HyDE Dense", "Sparse BM25", "Graph RAG"]
+        # BUG-017: report only what actually ran (use_hyde=False, use_graph=False)
+        methods = ["Web Search"] if web_search_used else ["Dense Retrieval", "Sparse BM25"]
         pipeline_info = {
             "type": "pipeline",
             "methods": methods,
             "chunks_retrieved": len(active_chunks),
             "reranked": not web_search_used,
-            "has_hallucination": has_hallucination,
+            "has_hallucination": False,
             "grader_passed": True,
         }
         yield f"data: {json.dumps(pipeline_info)}\n\n"
 
-        # Save to memory
         if request.session_id:
             await save_exchange(
                 session_id=request.session_id,
                 query=request.query,
                 answer=full_answer,
                 db=db,
+                user_id=current_user.id,
             )
 
         yield "data: {\"type\": \"done\"}\n\n"
@@ -358,14 +437,27 @@ async def query_stream(request: QueryRequest, req: Request, db: AsyncSession = D
 
 
 @router.post("/query", response_model=QueryResponse)
-async def query(request: QueryRequest, db: AsyncSession = Depends(get_db)):
+async def query(
+    request: QueryRequest,
+    req: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Query the knowledge base using the agentic RAG pipeline."""
+    # BUG-008: /query had no rate limit — added same check as /query/stream
+    client_ip = _get_client_ip(req)
+    allowed, retry_after = check_rate_limit(client_ip)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={"error": "rate_limit", "retry_after": retry_after},
+        )
+
     graph = build_graph()
 
-    # Load conversation history if session_id provided
     conversation_history = []
     if request.session_id:
-        conversation_history = await load_history(request.session_id, db)
+        conversation_history = await load_history(request.session_id, db, user_id=current_user.id)
 
     result = await graph.ainvoke({
         "query": request.query,
@@ -398,13 +490,13 @@ async def query(request: QueryRequest, db: AsyncSession = Depends(get_db)):
     if result["has_hallucination"]:
         answer += "\n\n[Warning: This answer may contain information not fully supported by the retrieved context.]"
 
-    # Persist this exchange to memory
     if request.session_id:
         await save_exchange(
             session_id=request.session_id,
             query=request.query,
             answer=answer,
             db=db,
+            user_id=current_user.id,
         )
 
     return QueryResponse(

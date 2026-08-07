@@ -69,11 +69,17 @@ services:
     command: >
       sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2"
 
-  celery_worker:
+  # Two workers, one per queue. This split is the whole point of the queues:
+  # a single worker consuming both would still let five background web-result
+  # ingests block the upload a user is actively waiting on.
+  #
+  # -Q names the queue to consume. A worker with no -Q consumes the default queue
+  # only, which would silently leave `background` tasks piling up forever.
+  celery_ingest:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: researchos_celery
+    container_name: researchos_celery_ingest
     restart: unless-stopped
     env_file: .env
     environment:
@@ -87,7 +93,27 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A backend.workers.celery_app worker --loglevel=info -P solo
+    command: celery -A backend.workers.celery_app worker --loglevel=info -P solo -Q ingest -n ingest@%h
+
+  celery_background:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: researchos_celery_background
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_URL: postgresql+asyncpg://postgres:password@postgres:5432/researchos
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A backend.workers.celery_app worker --loglevel=info -P solo -Q background -n background@%h
 
   frontend:
     build:

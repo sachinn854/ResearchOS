@@ -1,8 +1,9 @@
-"use client"
+﻿"use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { getTaskStatus, ingestAsync, uploadFile } from "@/lib/api"
+import { useAuth } from "@/lib/auth-context"
 
 const DOMAINS = [
   { value: "ml", label: "ML / AI" },
@@ -14,6 +15,9 @@ const DOMAINS = [
   { value: "math", label: "Mathematics" },
 ]
 
+const MAX_FILE_MB = 50
+const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
+
 interface IngestResult {
   taskId?: string
   documentId?: string
@@ -21,6 +25,7 @@ interface IngestResult {
 }
 
 export default function IngestPage() {
+  const { user, loading: authLoading, logout } = useAuth()
   const [title, setTitle] = useState("")
   const [domain, setDomain] = useState("ml")
   const [loading, setLoading] = useState(false)
@@ -34,7 +39,17 @@ export default function IngestPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+  useEffect(() => {
+    // Don't redirect until the provider has finished verifying the token,
+    // otherwise a refresh bounces the user to /login while user is still null.
+    if (!authLoading && !user) window.location.href = "/login"
+  }, [authLoading, user])
+
+  useEffect(() => {
+    // Separate effect so the poll cleanup does not re-register every time the
+    // auth state settles.
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [])
 
   function startPolling(taskId: string) {
     pollRef.current = setInterval(async () => {
@@ -51,6 +66,7 @@ export default function IngestPage() {
     setDragOver(false)
     const file = e.dataTransfer.files[0]
     if (!file) return
+    if (file.size > MAX_FILE_BYTES) { setError(`File too large. Maximum size is ${MAX_FILE_MB}MB.`); return }
     setSelectedFile(file)
     if (!title) setTitle(file.name.replace(/\.[^.]+$/, ""))
   }, [title])
@@ -58,8 +74,42 @@ export default function IngestPage() {
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    if (file.size > MAX_FILE_BYTES) {
+      setError(`File too large. Maximum ${MAX_FILE_MB}MB (this file is ${(file.size / 1024 / 1024).toFixed(1)}MB).`)
+      return
+    }
     setSelectedFile(file)
     if (!title) setTitle(file.name.replace(/\.[^.]+$/, ""))
+  }
+
+  // BUG-035: switching tabs used to leave the other tab's state behind, which
+  // caused three separate surprises:
+  //   1. Pick a file -> go to URL tab -> come back -> pick the SAME file again.
+  //      Nothing happened. The <input type="file"> still held that filename, so
+  //      the browser saw no change and never fired onChange. We have to reset
+  //      the input's own value, not just our React state.
+  //   2. The old error message stayed on screen while you typed in the new tab.
+  //   3. After a finished ingest, the old success card (and its 3s poll) kept
+  //      running while you started a completely new upload.
+  function switchTab(next: "file" | "url") {
+    if (next === tab) return
+
+    setTab(next)
+    setError(null)
+    setResult(null)
+    setTaskStatus(null)
+
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+
+    if (next === "file") {
+      setUrlSource("")
+    } else {
+      setSelectedFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+    }
   }
 
   async function handleSubmit() {
@@ -85,6 +135,8 @@ export default function IngestPage() {
 
   const currentStatus = taskStatus ?? result?.status ?? ""
 
+  if (authLoading || !user) return <div className="h-screen" style={{ background: "var(--background)" }} />
+
   return (
     <div className="flex h-screen" style={{ background: "var(--background)", color: "var(--foreground)" }}>
 
@@ -93,7 +145,7 @@ export default function IngestPage() {
         <div className="px-5 py-5" style={{ borderBottom: "1px solid var(--sidebar-border)" }}>
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-base font-bold"
-              style={{ background: "linear-gradient(135deg, #4f8ef7 0%, #7c5df7 100%)" }}>
+              style={{ background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)" }}>
               R
             </div>
             <div>
@@ -103,19 +155,43 @@ export default function IngestPage() {
           </div>
         </div>
 
-        <div className="px-3 py-4 flex-1">
-          <p className="text-xs font-semibold uppercase tracking-widest px-2 mb-3" style={{ color: "var(--muted-foreground)" }}>
+        <div className="px-3 py-4 flex-1 flex flex-col gap-1">
+          <p className="text-xs font-semibold uppercase tracking-widest px-2 mb-2" style={{ color: "var(--muted-foreground)" }}>
             Navigation
           </p>
           <Link href="/" className="block">
-            <button className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-all"
+            <button className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all"
               style={{ color: "var(--muted-foreground)" }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.06)"; (e.currentTarget as HTMLElement).style.color = "var(--foreground)" }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.05)"; (e.currentTarget as HTMLElement).style.color = "var(--foreground)" }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ""; (e.currentTarget as HTMLElement).style.color = "var(--muted-foreground)" }}
             >
               ← Back to Chat
             </button>
           </Link>
+        </div>
+
+        {/* User + logout */}
+        <div className="px-3 pb-4 pt-3 space-y-1" style={{ borderTop: "1px solid var(--sidebar-border)" }}>
+          <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl" style={{ background: "rgba(204,107,69,0.06)", border: "1px solid rgba(204,107,69,0.1)" }}>
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0"
+              style={{ background: "linear-gradient(135deg, #cc6b45, #e8845a)" }}>
+              {user.name.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium truncate" style={{ color: "var(--foreground)" }}>{user.name}</p>
+              <p className="text-[10px] truncate" style={{ color: "var(--muted-foreground)" }}>{user.email}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => { logout(); window.location.href = "/login" }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition-all"
+            style={{ color: "var(--muted-foreground)" }}
+            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = "rgba(248,113,113,0.08)"; el.style.color = "#f87171" }}
+            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = ""; el.style.color = "var(--muted-foreground)" }}
+          >
+            <span className="text-sm leading-none">→</span>
+            Sign out
+          </button>
         </div>
       </aside>
 
@@ -126,7 +202,7 @@ export default function IngestPage() {
           <div className="mb-8">
             <h1 className="text-2xl font-semibold mb-2" style={{ color: "var(--foreground)" }}>Add Document</h1>
             <p className="text-base" style={{ color: "var(--muted-foreground)" }}>
-              Upload a PDF or paste a URL — runs through the full ingestion pipeline: parse → chunk → embed → store.
+              Upload a PDF or paste a URL — parse → chunk → embed → store.
             </p>
           </div>
 
@@ -137,7 +213,7 @@ export default function IngestPage() {
               {(["file", "url"] as const).map(t => (
                 <button
                   key={t}
-                  onClick={() => setTab(t)}
+                  onClick={() => switchTab(t)}
                   className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
                   style={tab === t ? {
                     background: "var(--card)",
@@ -152,46 +228,38 @@ export default function IngestPage() {
               ))}
             </div>
 
-            {/* File drag & drop */}
+            {/* File drop zone */}
             {tab === "file" && (
               <div
                 onDragOver={e => { e.preventDefault(); setDragOver(true) }}
                 onDragLeave={() => setDragOver(false)}
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all"
+                className="border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all"
                 style={dragOver ? {
-                  borderColor: "#4f8ef7",
-                  background: "rgba(79,142,247,0.06)",
+                  borderColor: "#cc6b45",
+                  background: "rgba(204,107,69,0.06)",
                 } : selectedFile ? {
-                  borderColor: "#34d399",
+                  borderColor: "#e8845a",
                   background: "rgba(52,211,153,0.06)",
                 } : {
                   borderColor: "var(--border)",
                 }}
               >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.txt,.md,.docx"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
+                <input ref={fileInputRef} type="file" accept=".pdf,.txt,.md,.docx" className="hidden" onChange={handleFileChange} />
                 {selectedFile ? (
                   <div>
                     <div className="text-3xl mb-3">📄</div>
-                    <p className="text-base font-medium" style={{ color: "#34d399" }}>{selectedFile.name}</p>
+                    <p className="text-base font-medium" style={{ color: "#e8845a" }}>{selectedFile.name}</p>
                     <p className="text-sm mt-1" style={{ color: "var(--muted-foreground)" }}>
                       {(selectedFile.size / 1024).toFixed(0)} KB · Click to change
                     </p>
                   </div>
                 ) : (
                   <div>
-                    <div className="text-3xl mb-3 opacity-40">📁</div>
+                    <div className="text-3xl mb-3 opacity-30">📁</div>
                     <p className="text-base font-medium" style={{ color: "var(--foreground)" }}>Drag & drop your file here</p>
-                    <p className="text-sm mt-1" style={{ color: "var(--muted-foreground)" }}>
-                      or click to browse · PDF, TXT, DOCX, MD
-                    </p>
+                    <p className="text-sm mt-1" style={{ color: "var(--muted-foreground)" }}>or click to browse · PDF, TXT, DOCX, MD</p>
                   </div>
                 )}
               </div>
@@ -207,13 +275,9 @@ export default function IngestPage() {
                   placeholder="https://arxiv.org/pdf/2005.11401"
                   disabled={loading}
                   className="w-full px-3.5 py-2.5 rounded-xl text-base outline-none transition-all"
-                  style={{
-                    background: "var(--secondary)",
-                    border: "1px solid var(--border)",
-                    color: "var(--foreground)",
-                  }}
-                  onFocus={e => { e.currentTarget.style.borderColor = "#4f8ef7" }}
-                  onBlur={e => { e.currentTarget.style.borderColor = "var(--border)" }}
+                  style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}
+                  onFocus={e => { e.currentTarget.style.borderColor = "rgba(204,107,69,0.5)"; e.currentTarget.style.background = "rgba(204,107,69,0.06)" }}
+                  onBlur={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--secondary)" }}
                 />
               </div>
             )}
@@ -227,13 +291,9 @@ export default function IngestPage() {
                 placeholder="Attention Is All You Need"
                 disabled={loading}
                 className="w-full px-3.5 py-2.5 rounded-xl text-base outline-none transition-all"
-                style={{
-                  background: "var(--secondary)",
-                  border: "1px solid var(--border)",
-                  color: "var(--foreground)",
-                }}
-                onFocus={e => { e.currentTarget.style.borderColor = "#4f8ef7" }}
-                onBlur={e => { e.currentTarget.style.borderColor = "var(--border)" }}
+                style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}
+                onFocus={e => { e.currentTarget.style.borderColor = "rgba(204,107,69,0.5)"; e.currentTarget.style.background = "rgba(204,107,69,0.06)" }}
+                onBlur={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--secondary)" }}
               />
             </div>
 
@@ -244,17 +304,11 @@ export default function IngestPage() {
                 value={domain}
                 onChange={e => setDomain(e.target.value)}
                 disabled={loading}
-                className="w-full px-3.5 py-2.5 rounded-xl text-base outline-none transition-all appearance-none"
-                style={{
-                  background: "var(--secondary)",
-                  border: "1px solid var(--border)",
-                  color: "var(--foreground)",
-                }}
+                className="w-full px-3.5 py-2.5 rounded-xl text-base outline-none transition-all appearance-none cursor-pointer"
+                style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}
               >
                 {DOMAINS.map(d => (
-                  <option key={d.value} value={d.value} style={{ background: "var(--card)" }}>
-                    {d.label}
-                  </option>
+                  <option key={d.value} value={d.value} style={{ background: "var(--card)" }}>{d.label}</option>
                 ))}
               </select>
             </div>
@@ -265,12 +319,10 @@ export default function IngestPage() {
               disabled={loading || !title.trim() || (tab === "file" ? !selectedFile : !urlSource.trim())}
               className="w-full py-3 rounded-xl text-base font-semibold text-white transition-all"
               style={loading || !title.trim() || (tab === "file" ? !selectedFile : !urlSource.trim()) ? {
-                background: "var(--secondary)",
-                color: "var(--muted-foreground)",
-                cursor: "not-allowed",
+                background: "var(--secondary)", color: "var(--muted-foreground)", cursor: "not-allowed",
               } : {
-                background: "linear-gradient(135deg, #4f8ef7 0%, #3a7aec 100%)",
-                boxShadow: "0 4px 16px rgba(79,142,247,0.35)",
+                background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)",
+                boxShadow: "0 4px 20px rgba(204,107,69,0.35)",
               }}
             >
               {loading ? (
@@ -284,7 +336,7 @@ export default function IngestPage() {
             {/* Error */}
             {error && (
               <div className="rounded-xl px-4 py-3.5 text-sm"
-                style={{ background: "rgba(229,87,87,0.1)", border: "1px solid rgba(229,87,87,0.25)", color: "#e57373" }}>
+                style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", color: "#f87171" }}>
                 {error}
               </div>
             )}
@@ -292,10 +344,10 @@ export default function IngestPage() {
             {/* Result */}
             {result && (() => {
               const statusMap: Record<string, { bg: string; color: string; label: string }> = {
-                completed: { bg: "rgba(52,211,153,0.1)", color: "#34d399", label: "Completed" },
-                failed: { bg: "rgba(229,87,87,0.1)", color: "#e57373", label: "Failed" },
-                running: { bg: "rgba(79,142,247,0.1)", color: "#4f8ef7", label: "Running…" },
-                queued: { bg: "rgba(251,191,36,0.1)", color: "#fbbf24", label: "Queued…" },
+                completed: { bg: "rgba(52,211,153,0.08)", color: "#e8845a", label: "Completed" },
+                failed: { bg: "rgba(248,113,113,0.08)", color: "#f87171", label: "Failed" },
+                running: { bg: "rgba(204,107,69,0.08)", color: "#e8845a", label: "Running…" },
+                queued: { bg: "rgba(251,191,36,0.08)", color: "#fbbf24", label: "Queued…" },
               }
               const s = statusMap[currentStatus] ?? { bg: "var(--secondary)", color: "var(--muted-foreground)", label: currentStatus }
               return (
@@ -324,3 +376,6 @@ export default function IngestPage() {
     </div>
   )
 }
+
+
+

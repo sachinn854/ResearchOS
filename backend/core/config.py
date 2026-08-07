@@ -12,22 +12,31 @@ class Settings(BaseSettings):
 
     # LLM — OpenRouter
     openrouter_api_key: str = Field(description="OpenRouter API key")
+    # BUG-038: these defaults must match .env / .env.example. Earlier the code
+    # defaulted to llama-3.3-70b while .env used gpt-oss-120b — so anyone running
+    # without a .env got a silently different (weaker) model than the one we tuned
+    # prompts and thresholds against.
     llm_model: str = Field(
-        default="meta-llama/llama-3.3-70b-instruct:free",
-        description="OpenRouter model ID — use :free suffix for free models"
+        default="openai/gpt-oss-120b",
+        description="Main generation model — OpenRouter model ID. Override with LLM_MODEL in .env"
     )
     fast_llm_model: str = Field(
-        default="google/gemma-3-4b-it:free",
-        description="Smaller/faster model for domain check, HyDE — set FAST_LLM_MODEL in .env"
+        default="openai/gpt-oss-20b:free",
+        description="Smaller/faster model for domain check, HyDE, entity extraction — set FAST_LLM_MODEL in .env"
     )
     llm_provider: str | None = Field(
         default=None,
         description="OpenRouter provider preference e.g. 'Fireworks', 'Together', 'DeepInfra'. None = OpenRouter auto-selects."
     )
+    vision_llm_model: str = Field(
+        default="meta-llama/llama-3.2-11b-vision-instruct",
+        description="Vision-capable model for PDF image description. Set VISION_LLM_MODEL in .env to override."
+    )
 
     # Databases
     postgres_url: str = Field(description="Async PostgreSQL connection string")
     qdrant_url: str = Field(description="Qdrant vector DB URL")
+    qdrant_api_key: str | None = Field(default=None, description="Qdrant Cloud API key")
     qdrant_collection: str = Field(
         default="researchos_chunks",
         description="Qdrant collection name for storing chunk vectors"
@@ -42,6 +51,33 @@ class Settings(BaseSettings):
     embedding_dimension: int = Field(
         default=384,
         description="Output dimension of the embedding model — must match Qdrant collection size"
+    )
+
+    # Auth
+    # No default on purpose. A fallback secret would be committed to the repo,
+    # and anyone holding it could mint valid tokens for any account — so the app
+    # refuses to start rather than run with a known key.
+    jwt_secret_key: str = Field(
+        description="Secret used to sign JWTs. Generate with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+    )
+    jwt_algorithm: str = Field(default="HS256", description="JWT signing algorithm")
+    access_token_expire_minutes: int = Field(
+        default=60 * 24 * 7,
+        description=(
+            "Token lifetime in minutes (default 7 days). There is no refresh token and no "
+            "revocation list, so this is also how long a stolen token stays usable — shorten it "
+            "if that matters more than users staying signed in."
+        )
+    )
+
+    # Ingestion feature flags
+    enable_entity_extraction: bool = Field(
+        default=True,
+        description=(
+            "Extract entities per chunk during ingestion to power the graph retrieval signal. "
+            "Costs one batched LLM call per 5 chunks — set ENABLE_ENTITY_EXTRACTION=false to "
+            "make ingestion cheaper and faster at the cost of losing the graph signal."
+        )
     )
 
     # Langfuse (optional — leave empty to disable tracing)
