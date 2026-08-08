@@ -14,36 +14,48 @@ COPY . .
 
 EXPOSE 8000
 
-# Two things this has to get right, both of which bit us on Railway:
+# Start uvicorn and nothing else. Migrations are deliberately NOT here.
 #
-# 1. $PORT. Railway (and Render, Fly, Heroku) assign the port at runtime and
-#    route only to that one. Hard-coding 8000 meant the container came up fine
-#    and the platform proxy got nothing — "Application failed to respond", 502,
-#    with healthy-looking container logs. Defaults to 8000 so local docker runs
-#    are unchanged.
+# $PORT: Railway (and Render, Fly, Heroku) assign the port at runtime and route
+# only to that one. Hard-coding 8000 meant the container came up fine and the
+# platform proxy got nothing — "Application failed to respond", 502, with
+# healthy-looking logs. Defaults to 8000 so local docker runs are unchanged.
 #
-# 2. Migrations. docker-compose.yml ran "alembic upgrade head" as a command
-#    override, so it never applied anywhere else. On a fresh managed database
-#    that leaves every table missing and every request failing.
+# Why migrations are gone from this line, in three steps:
 #
-# Migrations must not be able to prevent the API from starting. Chaining them
-# with && did exactly that: alembic connected, printed its two startup lines and
-# then hung — most likely on a lock or a pooler connection limit left behind by
-# earlier crashed deploys — so uvicorn was never reached. The platform edge had
-# nothing to route to and every request came back as a 502, which in a browser
-# surfaces as a CORS error because an edge error page carries no
-# Access-Control-Allow-Origin header. Hours of debugging pointed at CORS and the
-# real cause was a blocked startup.
+# 1. They started as a docker-compose command override, so they only ever ran
+#    under compose — never on a deployed platform. A fresh managed database was
+#    left with no tables at all.
 #
-# So: give migrations a bounded attempt, log the outcome, and start the API
-# either way. A reachable app that reports its own errors beats an unreachable
-# one that reports nothing. If migrations really did not apply, the failure shows
-# up as a clear database error per request instead of a silent 502.
+# 2. Moving them here as "alembic upgrade head && uvicorn" made it worse.
+#    Alembic connected, printed its two startup lines, and hung — a lock or a
+#    pooler connection limit left behind by an earlier crashed deploy. With &&,
+#    uvicorn was never reached. The edge had nothing to route to, so every
+#    request was a 502; in a browser that surfaces as a CORS error, because an
+#    edge error page carries no Access-Control-Allow-Origin header. That sent
+#    the debugging in entirely the wrong direction.
+#
+# 3. "timeout 90 alembic upgrade head; uvicorn" looked like the fix and was not.
+#    timeout sends SIGTERM, and the driver was blocked inside a C-level socket
+#    call — CPython can only run a signal handler between bytecodes, so the
+#    signal sat unhandled and the process hung anyway. The deploy log ended on
+#    alembic's second line and the container went to EXITED without ever
+#    printing the warning branch or reaching uvicorn.
+#
+# The real lesson is that schema changes do not belong in the start command of
+# a web process at all. Every replica would race the same migration, and any
+# migration problem becomes an outage of an app that could otherwise serve.
+# Run them as a deliberate one-off step instead, before or after deploying:
+#
+#   railway run --service researchos-backend alembic upgrade head
+#
+# If the schema really is behind, requests fail with a clear Postgres error
+# naming the missing table. That is diagnosable. An unreachable app is not.
 #
 # exec keeps uvicorn as PID 1 so it receives SIGTERM on shutdown.
 # sh -c is needed for ${PORT} expansion — the exec form does not run a shell.
 #
 # The Celery worker uses this same image but must override the start command,
-# since it should not serve HTTP or run migrations concurrently with the API:
+# since it should not serve HTTP:
 #   celery -A backend.workers.celery_app worker -P solo -Q ingest,background
-CMD ["sh", "-c", "timeout 90 alembic upgrade head && echo '[startup] migrations OK' || echo '[startup] WARNING: migrations skipped (timeout or error) — starting API anyway'; exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
