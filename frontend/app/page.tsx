@@ -60,6 +60,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("")
   const [domain, setDomain] = useState("all")
   const [loading, setLoading] = useState(false)
+  const [waitSeconds, setWaitSeconds] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessions, setSessions] = useState<SessionItem[]>([])
@@ -93,6 +94,20 @@ export default function ChatPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
+
+  // Count the seconds a query has been in flight. Nothing appears on screen
+  // between pressing send and the first streamed token, and that gap is real
+  // work — several searches over the papers, then verification passes before any
+  // text is allowed out. Bouncing dots alone left people wondering whether the
+  // request had died, so the wait is labelled and counted instead.
+  useEffect(() => {
+    if (!loading) {
+      setWaitSeconds(0)
+      return
+    }
+    const timer = setInterval(() => setWaitSeconds(prev => prev + 1), 1000)
+    return () => clearInterval(timer)
+  }, [loading])
 
   async function refreshSessions() {
     if (!user) return
@@ -421,13 +436,35 @@ export default function ChatPage() {
                         </div>
                       </div>
                     ) : (
-                      <div className="pl-10 flex gap-1.5 items-center h-8">
-                        {[0, 150, 300].map(delay => (
-                          <span key={delay}
-                            className="w-2 h-2 rounded-full animate-bounce"
-                            style={{ background: "#cc6b45", animationDelay: `${delay}ms` }}
-                          />
-                        ))}
+                      <div className="pl-10 space-y-2.5">
+                        <div className="flex gap-1.5 items-center h-8">
+                          {[0, 150, 300].map(delay => (
+                            <span key={delay}
+                              className="w-2 h-2 rounded-full animate-bounce"
+                              style={{ background: "#cc6b45", animationDelay: `${delay}ms` }}
+                            />
+                          ))}
+                          <span className="ml-2.5 text-sm" style={{ color: "var(--muted-foreground)" }}>
+                            Working through the papers
+                            {/* Hidden for the first couple of seconds — a counter that
+                                flashes "1s" on a fast answer just looks twitchy. */}
+                            {waitSeconds > 2 && (
+                              <span className="font-mono ml-1.5 opacity-70">{waitSeconds}s</span>
+                            )}
+                          </span>
+                        </div>
+
+                        {/* Only while this query is actually running, and only on the
+                            last message — an older empty message should not claim to
+                            be in progress. */}
+                        {loading && i === messages.length - 1 && (
+                          <p className="text-xs leading-relaxed max-w-lg" style={{ color: "var(--muted-foreground)" }}>
+                            This usually takes 30–60 seconds. Your question is searched across the
+                            full text of every paper, and the answer is checked against its own
+                            sources before any of it is shown — so it is slower than a plain chatbot,
+                            but the citations can be trusted.
+                          </p>
+                        )}
                       </div>
                     )}
 
