@@ -17,7 +17,7 @@ from backend.ingestion.parsers.txt_parser import TXTParser
 from backend.ingestion.parsers.web_parser import WebParser
 from backend.ingestion.parsers.base import BaseParser
 from backend.ingestion.chunking.factory import get_chunker
-from backend.ingestion.embedding.embedding_service import EmbeddingService
+from backend.ingestion.embedding.embedding_service import get_embedder
 from backend.ingestion.cleaning.text_cleaner import clean_page_text, is_clean_chunk
 from backend.ingestion.graph.entity_extractor import extract_entities_for_chunks
 from sqlalchemy import select
@@ -28,17 +28,6 @@ log = logging.getLogger("researchos.ingestion.pipeline")
 # in the payload is a few KB per point, so 64 keeps each request small enough to
 # finish comfortably inside the client timeout.
 QDRANT_UPSERT_BATCH = 64
-
-# BUG-013: singleton — fastembed model loaded once per process, not per request
-_embedder: EmbeddingService | None = None
-
-
-def _get_embedder() -> EmbeddingService:
-    global _embedder
-    if _embedder is None:
-        _embedder = EmbeddingService()
-    return _embedder
-
 
 def _detect_type(source: str) -> str:
     if source.startswith("http://") or source.startswith("https://"):
@@ -100,7 +89,9 @@ async def ingest_document(
 
     parser = _get_parser(doc_type)
     chunker = get_chunker(doc_type)
-    embedder = _get_embedder()  # BUG-013: singleton
+    # BUG-013: one model per process, not per request. Now shared with retrieval
+    # too, so the API and the worker each hold exactly one copy.
+    embedder = get_embedder()
 
     # Step 1: Parse
     log.info("[pipeline] step 1/8 — parsing...")

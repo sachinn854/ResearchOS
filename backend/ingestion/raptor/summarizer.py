@@ -8,10 +8,9 @@ from sklearn.cluster import KMeans
 from backend.core.config import settings
 from backend.core.llm import llm as _llm, provider_kwargs
 from backend.db.qdrant_client import client as qdrant_client
-from backend.ingestion.embedding.embedding_service import EmbeddingService
+from backend.ingestion.embedding.embedding_service import get_embedder
 
 log = logging.getLogger("researchos.raptor")
-_embedder = EmbeddingService()
 
 _SYSTEM = (
     "You are a research summarizer. "
@@ -102,7 +101,7 @@ def build_raptor_summaries(domain: str | None = None) -> int:
         texts = [c["text"] for c in group]
         log.info("[raptor] summarizing cluster %d/%d (%d chunks)...", i + 1, n_clusters, len(texts))
         summary_text = _summarize_cluster(texts)
-        summary_vector = _embedder.embed_one(summary_text)
+        summary_vector = get_embedder().embed_one(summary_text)
 
         summary_points.append(PointStruct(
             id=str(uuid.uuid4()),

@@ -37,7 +37,22 @@ log = logging.getLogger("researchos.app")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("ResearchOS starting up...")
-    init_collection()
+
+    # Nothing on the startup path is allowed to stop the API from serving. This
+    # is the same lesson as the alembic hang in the Dockerfile: init_collection()
+    # is a blocking network call to Qdrant Cloud on a client with a 120s timeout,
+    # so an unreachable or slow Qdrant could hold startup for two minutes, and a
+    # raise would abort startup completely. Either way uvicorn never binds, the
+    # platform proxy has nothing to route to, and every request is a 502 that
+    # never appears in this log — which reads like the app was never deployed.
+    #
+    # If the collection really is missing, retrieval fails per request with a
+    # clear Qdrant error. That is diagnosable; an unreachable app is not.
+    try:
+        init_collection()
+    except Exception as exc:
+        log.warning("Qdrant init failed, starting anyway: %s: %s", type(exc).__name__, exc)
+
     log.info("Ready.")
     yield
     log.info("ResearchOS shutting down.")

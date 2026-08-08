@@ -5,7 +5,7 @@ from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 from backend.core.config import settings
 from backend.db.qdrant_client import client as qdrant_client
-from backend.ingestion.embedding.embedding_service import EmbeddingService
+from backend.ingestion.embedding.embedding_service import get_embedder
 
 log = logging.getLogger("researchos.retrieval.dense")
 
@@ -21,13 +21,16 @@ class RetrievedChunk:
 
 
 class DenseRetriever:
-    def __init__(self):
-        self.embedder = EmbeddingService()
+    # No __init__ on purpose. It used to build its own EmbeddingService, which
+    # meant constructing a retriever loaded a model — and the routes module
+    # constructs two retrievers at import time, before uvicorn opens the port.
+    # The model is fetched per call instead; get_embedder() hands back the same
+    # shared instance every time, so this costs nothing after the first query.
 
     def retrieve(self, query: str, top_k: int = 5, domain: str | None = None) -> list[RetrievedChunk]:
         """Embed the query and search Qdrant for the most similar chunks."""
         log.info("[dense] embedding query...")
-        vector = self.embedder.embed_one(query)
+        vector = get_embedder().embed_one(query)
 
         query_filter = None
         if domain:

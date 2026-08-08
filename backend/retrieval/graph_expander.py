@@ -5,12 +5,10 @@ from qdrant_client.models import FieldCondition, Filter, MatchAny
 
 from backend.core.config import settings
 from backend.db.qdrant_client import client as qdrant_client
-from backend.ingestion.embedding.embedding_service import EmbeddingService
+from backend.ingestion.embedding.embedding_service import get_embedder
 from backend.retrieval.dense_retriever import RetrievedChunk
 
 log = logging.getLogger("researchos.retrieval.graph")
-
-_embedder = EmbeddingService()
 
 _SYSTEM = """Extract key technical entities from this search query.
 Return JSON: {"entities": ["entity1", "entity2"]}
@@ -59,7 +57,7 @@ def retrieve_by_entities(
     if domain:
         must.append(FieldCondition(key="domain", match=MatchAny(any=[domain])))
 
-    vector = _embedder.embed_one(query)
+    vector = get_embedder().embed_one(query)
 
     results = qdrant_client.query_points(
         collection_name=settings.qdrant_collection,
