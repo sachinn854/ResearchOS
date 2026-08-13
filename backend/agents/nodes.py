@@ -143,7 +143,13 @@ Reply with JSON only — no explanation:
             model=settings.fast_llm_model,  # BUG-034: classification uses fast model
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            max_tokens=10,
+            # Not 10. gpt-oss reasons before it writes, and max_tokens caps the
+            # reasoning trace and the visible content together — so a 10-token
+            # budget returned finish_reason="length" and content=None every
+            # single time. json.loads(None) then raised, the except below
+            # swallowed it, and this node has been answering "relevant" no
+            # matter what the chunks said.
+            max_tokens=300,
         )
         data = json.loads(response.choices[0].message.content)
         is_relevant = bool(data.get("relevant", True))
@@ -396,7 +402,10 @@ Reply with JSON only — no explanation:
             model=settings.llm_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
-            max_tokens=10,
+            # See grader_node — same reasoning-token trap. With 10 this check
+            # never once ran; it reported "grounded" for every answer because
+            # the exception handler is its default.
+            max_tokens=300,
         )
         data = json.loads(response.choices[0].message.content)
         has_hallucination = not bool(data.get("grounded", True))

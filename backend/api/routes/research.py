@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -53,6 +54,20 @@ _DOMAIN_LABELS = {
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # BUG-010: 50 MB hard limit
 
+log = logging.getLogger("researchos.api.research")
+
+# Token budget for a yes/no classification. Absurd-looking for a two-letter
+# answer, and it has to be.
+#
+# Every model we run is a reasoning model (openai/gpt-oss-*). It emits an
+# internal reasoning trace before any visible content, and `max_tokens` caps the
+# two together. The domain check used to ask for 5 tokens: the trace consumed all
+# five, the response came back `finish_reason="length"` with `content=None`, and
+# that was true of both the free and the paid model. Measured, the same prompt
+# needs 51-63 completion tokens to get as far as emitting "yes" or "no", so this
+# leaves generous headroom rather than sitting just above the observed figure.
+CLASSIFY_MAX_TOKENS = 300
+
 router = APIRouter(prefix="/research", tags=["research"])
 
 
@@ -65,21 +80,50 @@ def _get_client_ip(req: Request) -> str:
 
 
 def _check_domain_sync(query: str, domain_label: str) -> bool:
-    """Returns True if query is relevant to the domain, False if off-domain."""
-    resp = _llm.chat.completions.create(**provider_kwargs(),
-        model=settings.fast_llm_model,
-        messages=[{
-            "role": "user",
-            "content": (
-                f'Domain: {domain_label}\n'
-                f'Query: "{query}"\n\n'
-                f'Is this query about {domain_label}? Answer only: yes or no'
-            ),
-        }],
-        temperature=0,
-        max_tokens=5,
-    )
-    answer = resp.choices[0].message.content.strip().lower()
+    """Returns True if query is relevant to the domain, False if off-domain.
+
+    Fails OPEN. This runs on `fast_llm_model`, which is a `:free` OpenRouter
+    model and therefore shares an upstream rate-limit pool with every other free
+    user — it returns 429 regularly and through no fault of ours.
+
+    The check is a convenience guardrail, not a security boundary, so a failure
+    here must not decide the request. It used to raise straight out of
+    `query_stream`, and because the exception happened *before* the
+    StreamingResponse was constructed the client got a dead request with no SSE
+    frames at all: picking any domain other than "All Domains" looked exactly
+    like streaming being broken, while "All Domains" (which skips this call)
+    worked perfectly. Letting a possibly off-domain question through is a far
+    smaller cost than refusing to answer anything.
+    """
+    try:
+        resp = _llm.chat.completions.create(**provider_kwargs(),
+            model=settings.fast_llm_model,
+            messages=[{
+                "role": "user",
+                "content": (
+                    f'Domain: {domain_label}\n'
+                    f'Query: "{query}"\n\n'
+                    f'Is this query about {domain_label}? Answer only: yes or no'
+                ),
+            }],
+            temperature=0,
+            max_tokens=CLASSIFY_MAX_TOKENS,
+        )
+        # `.content` is None whenever the model returns no text (a refusal, or a
+        # provider that only populated a tool-call field), and .strip() on None
+        # raises — which would defeat the whole point of this try block.
+        answer = (resp.choices[0].message.content or "").strip().lower()
+    except Exception as exc:
+        log.warning(
+            "[stream] domain check unavailable, allowing query through | model=%s | %s: %s",
+            settings.fast_llm_model, type(exc).__name__, exc,
+        )
+        return True
+
+    if not answer:
+        log.warning("[stream] domain check returned nothing, allowing query through")
+        return True
+
     return answer.startswith("yes")
 
 
@@ -375,21 +419,15 @@ async def query_stream(
                     "[stream] background KB ingest skipped (Celery unavailable): %s", _celery_err
                 )
 
-        # Stream tokens
-        gen_state = {
-            "query": request.query, "domain": request.domain, "db": db,
-            "session_id": request.session_id, "conversation_history": conversation_history,
-            "plan": {}, "sub_queries": [], "chunks": active_chunks,
-            "contradictions": [], "context": "", "answer": "",
-            "is_relevant": True, "has_hallucination": False,
-            "citation_verified": True, "web_search_used": web_search_used,
-            "web_sources": [], "sources": [],
-        }
-        full_answer = ""
-        for token in stream_generator_node(gen_state):
-            full_answer += token
-            yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
-
+        # Sources and pipeline go out BEFORE the first token, not after the last.
+        #
+        # Nothing in either frame depends on the answer — both are built from
+        # `active_chunks`, which retrieval has already finished producing — so
+        # holding them until the end was ordering by accident rather than by
+        # need. It cost two things. The reader spent the whole generation with no
+        # idea which papers were being used, and when the frames finally arrived
+        # the UI had to insert the source list above an answer the reader was
+        # already partway through, moving the text under them.
         sources = [
             {
                 "document_id": c.document_id,
@@ -414,6 +452,40 @@ async def query_stream(
             "grader_passed": True,
         }
         yield f"data: {json.dumps(pipeline_info)}\n\n"
+
+        # Stream tokens
+        gen_state = {
+            "query": request.query, "domain": request.domain, "db": db,
+            "session_id": request.session_id, "conversation_history": conversation_history,
+            "plan": {}, "sub_queries": [], "chunks": active_chunks,
+            "contradictions": [], "context": "", "answer": "",
+            "is_relevant": True, "has_hallucination": False,
+            "citation_verified": True, "web_search_used": web_search_used,
+            "web_sources": [], "sources": [],
+        }
+        # Everything from here on runs after the 200 and the headers have already
+        # gone out, so FastAPI can no longer turn a raise into an error response.
+        # Without this block an exception mid-generation just closed the socket:
+        # the browser saw a normal end-of-stream, the frontend's reader reported
+        # `done` with no `error` frame, and the assistant message sat empty
+        # forever with nothing in the UI to say why.
+        #
+        # The frontend already handles `{"type": "error"}`, so the fix is to
+        # report the failure in-band on the stream we still have open.
+        full_answer = ""
+        try:
+            for token in stream_generator_node(gen_state):
+                full_answer += token
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+        except Exception as exc:
+            log.error("[stream] generation failed after %d chars | %s: %s",
+                      len(full_answer), type(exc).__name__, exc)
+            detail = "The model is rate-limited right now. Please try again in a moment." \
+                if type(exc).__name__ == "RateLimitError" \
+                else "Generation failed partway through. Please try again."
+            yield f"data: {json.dumps({'type': 'error', 'content': detail})}\n\n"
+            yield "data: {\"type\": \"done\"}\n\n"
+            return
 
         if request.session_id:
             await save_exchange(

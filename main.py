@@ -1,5 +1,6 @@
 import logging
 import logging.config
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,6 +10,16 @@ from backend.api.routes.auth import router as auth_router
 from backend.api.routes.research import router as research_router
 from backend.core.config import settings
 from backend.db.qdrant_client import init_collection
+
+# A Windows console defaults to cp1252, and any log line containing a character
+# outside it — a non-breaking hyphen or an em dash out of a model's answer is
+# enough — makes the handler raise UnicodeEncodeError and drop that line. On
+# Linux this is already UTF-8 and the call changes nothing, so it is not guarded
+# by a platform check. errors="replace" so an odd character degrades to "?"
+# rather than costing us the line we were trying to read.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 LOGGING_CONFIG = {
     "version": 1,

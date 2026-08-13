@@ -24,6 +24,24 @@ engine = create_async_engine(
     echo=settings.app_env == "development",
     pool_size=10,
     max_overflow=20,
+
+    # Both of these exist because the database is behind Supabase's connection
+    # pooler, which closes connections it considers idle without telling us. Our
+    # pool then hands out a socket the server has already hung up on, and the
+    # first statement raises `asyncpg InterfaceError: connection is closed`.
+    #
+    # The symptom was not obviously a database problem: /research/sessions
+    # returned 500 intermittently, the frontend swallowed it, and the sidebar
+    # just showed "No chats yet" — so it read as the chat history having been
+    # lost rather than as one failed request.
+    #
+    # pool_pre_ping issues a cheap liveness check before handing a connection
+    # over and transparently replaces a dead one. pool_recycle retires
+    # connections before the pooler's own idle timeout can get to them, so the
+    # pre-ping path stays the exception rather than the norm.
+    pool_pre_ping=True,
+    pool_recycle=300,
+
     connect_args=_connect_args(),
 )
 
