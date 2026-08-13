@@ -1,19 +1,15 @@
-﻿"use client"
+"use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import Link from "next/link"
+import { FileText, Loader2, Upload } from "lucide-react"
+
+import { DomainSelect } from "@/components/domain-select"
+import { TopBar } from "@/components/top-bar"
+import { Notice } from "@/components/notice"
+import { TextField } from "@/components/text-field"
 import { getTaskStatus, ingestAsync, uploadFile } from "@/lib/api"
 import { useAuth } from "@/lib/auth-context"
-
-const DOMAINS = [
-  { value: "ml", label: "ML / AI" },
-  { value: "dl", label: "Deep Learning" },
-  { value: "cs", label: "Computer Science" },
-  { value: "physics", label: "Physics" },
-  { value: "bio", label: "Biology" },
-  { value: "finance", label: "Finance" },
-  { value: "math", label: "Mathematics" },
-]
+import { cn } from "@/lib/utils"
 
 const MAX_FILE_MB = 50
 const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
@@ -24,8 +20,16 @@ interface IngestResult {
   status: string
 }
 
+/** What each backend status means for the person waiting on it. */
+const STATUS: Record<string, { tone: "success" | "error" | "info" | "warning"; label: string }> = {
+  completed: { tone: "success", label: "Ready to question" },
+  failed: { tone: "error", label: "Could not be read" },
+  running: { tone: "info", label: "Reading it now" },
+  queued: { tone: "warning", label: "Waiting for a worker" },
+}
+
 export default function IngestPage() {
-  const { user, loading: authLoading, logout } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   const [title, setTitle] = useState("")
   const [domain, setDomain] = useState("ml")
   const [loading, setLoading] = useState(false)
@@ -66,7 +70,7 @@ export default function IngestPage() {
     setDragOver(false)
     const file = e.dataTransfer.files[0]
     if (!file) return
-    if (file.size > MAX_FILE_BYTES) { setError(`File too large. Maximum size is ${MAX_FILE_MB}MB.`); return }
+    if (file.size > MAX_FILE_BYTES) { setError(`That file is over the ${MAX_FILE_MB}MB limit.`); return }
     setSelectedFile(file)
     if (!title) setTitle(file.name.replace(/\.[^.]+$/, ""))
   }, [title])
@@ -75,7 +79,7 @@ export default function IngestPage() {
     const file = e.target.files?.[0]
     if (!file) return
     if (file.size > MAX_FILE_BYTES) {
-      setError(`File too large. Maximum ${MAX_FILE_MB}MB (this file is ${(file.size / 1024 / 1024).toFixed(1)}MB).`)
+      setError(`That file is ${(file.size / 1024 / 1024).toFixed(1)}MB, over the ${MAX_FILE_MB}MB limit.`)
       return
     }
     setSelectedFile(file)
@@ -118,264 +122,192 @@ export default function IngestPage() {
     setLoading(true); setError(null); setResult(null); setTaskStatus(null)
     try {
       if (tab === "file") {
-        if (!selectedFile) { setError("Please select a file"); setLoading(false); return }
+        if (!selectedFile) { setError("Choose a file first."); setLoading(false); return }
         const res = await uploadFile(selectedFile, t, domain)
         setResult({ documentId: res.document_id, status: res.status })
       } else {
         const u = urlSource.trim()
-        if (!u) { setError("Please enter a URL"); setLoading(false); return }
+        if (!u) { setError("Paste a link first."); setLoading(false); return }
         const res = await ingestAsync({ title: t, source: u, domain })
         setResult({ taskId: res.task_id, status: res.status })
         startPolling(res.task_id)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ingestion failed")
+      setError(err instanceof Error ? err.message : "The document could not be added. Try again.")
     } finally { setLoading(false) }
   }
 
   const currentStatus = taskStatus ?? result?.status ?? ""
+  const canSubmit = Boolean(title.trim()) && (tab === "file" ? Boolean(selectedFile) : Boolean(urlSource.trim()))
 
-  if (authLoading || !user) return <div className="h-screen" style={{ background: "var(--background)" }} />
+  if (authLoading || !user) return <div className="bg-canvas h-dvh" />
 
   return (
-    <div className="flex h-screen" style={{ background: "var(--background)", color: "var(--foreground)" }}>
+    <div className="bg-canvas flex min-h-dvh flex-col">
+      <TopBar active="ingest" />
 
-      {/* Sidebar */}
-      <aside className="w-60 shrink-0 flex flex-col" style={{ background: "var(--sidebar)", borderRight: "1px solid var(--sidebar-border)" }}>
-        <div className="px-5 py-5" style={{ borderBottom: "1px solid var(--sidebar-border)" }}>
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-base font-bold"
-              style={{ background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)" }}>
-              R
-            </div>
-            <div>
-              <p className="font-semibold text-[15px] leading-tight" style={{ color: "var(--foreground)" }}>ResearchOS</p>
-              <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>AI Research Assistant</p>
-            </div>
-          </div>
-        </div>
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-xl px-5 py-10 sm:px-8 sm:py-14">
 
-        <div className="px-3 py-4 flex-1 flex flex-col gap-1">
-          <p className="text-xs font-semibold uppercase tracking-widest px-2 mb-2" style={{ color: "var(--muted-foreground)" }}>
-            Navigation
-          </p>
-          <Link href="/" className="block">
-            <button className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all"
-              style={{ color: "var(--muted-foreground)" }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.05)"; (e.currentTarget as HTMLElement).style.color = "var(--foreground)" }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = ""; (e.currentTarget as HTMLElement).style.color = "var(--muted-foreground)" }}
-            >
-              ← Back to Chat
-            </button>
-          </Link>
-        </div>
-
-        {/* User + logout */}
-        <div className="px-3 pb-4 pt-3 space-y-1" style={{ borderTop: "1px solid var(--sidebar-border)" }}>
-          <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl" style={{ background: "rgba(204,107,69,0.06)", border: "1px solid rgba(204,107,69,0.1)" }}>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0"
-              style={{ background: "linear-gradient(135deg, #cc6b45, #e8845a)" }}>
-              {user.name.charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate" style={{ color: "var(--foreground)" }}>{user.name}</p>
-              <p className="text-[10px] truncate" style={{ color: "var(--muted-foreground)" }}>{user.email}</p>
-            </div>
-          </div>
-          <button
-            onClick={() => { logout(); window.location.href = "/login" }}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition-all"
-            style={{ color: "var(--muted-foreground)" }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = "rgba(248,113,113,0.08)"; el.style.color = "#f87171" }}
-            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = ""; el.style.color = "var(--muted-foreground)" }}
-          >
-            <span className="text-sm leading-none">→</span>
-            Sign out
-          </button>
-        </div>
-      </aside>
-
-      {/* Main */}
-      <div className="flex-1 overflow-auto">
-        <div className="max-w-xl mx-auto px-6 py-12">
-
-          <div className="mb-8">
-            <h1 className="text-2xl font-semibold mb-2" style={{ color: "var(--foreground)" }}>Add Document</h1>
-            <p className="text-base" style={{ color: "var(--muted-foreground)" }}>
-              Upload a PDF or paste a URL — parse → chunk → embed → store.
+          <header className="mb-8">
+            <h1 className="font-display text-display text-foreground">Add a document</h1>
+            <p className="mt-3 text-read text-muted-foreground">
+              Upload a file or paste a link. When it finishes, you can ask questions
+              against it and the answers will cite its pages.
             </p>
-          </div>
+          </header>
 
-          <div className="rounded-2xl p-6 space-y-5" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-
-            {/* Tab selector */}
-            <div className="flex gap-1 p-1 rounded-xl" style={{ background: "var(--secondary)" }}>
+          <div className="space-y-6">
+            {/* Segmented control. The track sits on the list grey, which is darker
+                than the card in both themes, so the selected tab can rise to the
+                card's own level. */}
+            <div className="bg-list flex gap-1 rounded-xl border border-border p-1">
               {(["file", "url"] as const).map(t => (
                 <button
                   key={t}
+                  type="button"
                   onClick={() => switchTab(t)}
-                  className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
-                  style={tab === t ? {
-                    background: "var(--card)",
-                    color: "var(--foreground)",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                  } : {
-                    color: "var(--muted-foreground)",
-                  }}
+                  aria-pressed={tab === t}
+                  className={cn(
+                    "flex-1 rounded-lg py-2.5 text-ui-lg transition-colors",
+                    tab === t
+                      ? "bg-card font-bold text-foreground shadow-lift"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
                 >
-                  {t === "file" ? "Upload PDF" : "URL / Path"}
+                  {t === "file" ? "Upload a file" : "Paste a link"}
                 </button>
               ))}
             </div>
 
-            {/* File drop zone */}
             {tab === "file" && (
-              <div
-                onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all"
-                style={dragOver ? {
-                  borderColor: "#cc6b45",
-                  background: "rgba(204,107,69,0.06)",
-                } : selectedFile ? {
-                  borderColor: "#e8845a",
-                  background: "rgba(52,211,153,0.06)",
-                } : {
-                  borderColor: "var(--border)",
-                }}
-              >
-                <input ref={fileInputRef} type="file" accept=".pdf,.txt,.md,.docx" className="hidden" onChange={handleFileChange} />
-                {selectedFile ? (
-                  <div>
-                    <div className="text-3xl mb-3">📄</div>
-                    <p className="text-base font-medium" style={{ color: "#e8845a" }}>{selectedFile.name}</p>
-                    <p className="text-sm mt-1" style={{ color: "var(--muted-foreground)" }}>
-                      {(selectedFile.size / 1024).toFixed(0)} KB · Click to change
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    <div className="text-3xl mb-3 opacity-30">📁</div>
-                    <p className="text-base font-medium" style={{ color: "var(--foreground)" }}>Drag & drop your file here</p>
-                    <p className="text-sm mt-1" style={{ color: "var(--muted-foreground)" }}>or click to browse · PDF, TXT, DOCX, MD</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* URL input */}
-            {tab === "url" && (
-              <div className="space-y-2">
-                <label className="text-sm font-medium" style={{ color: "var(--foreground)" }}>URL or File Path</label>
+              <div>
+                {/* Sibling of the button, not a child: a <button> may not contain
+                    another interactive element. */}
                 <input
-                  value={urlSource}
-                  onChange={e => setUrlSource(e.target.value)}
-                  placeholder="https://arxiv.org/pdf/2005.11401"
-                  disabled={loading}
-                  className="w-full px-3.5 py-2.5 rounded-xl text-base outline-none transition-all"
-                  style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}
-                  onFocus={e => { e.currentTarget.style.borderColor = "rgba(204,107,69,0.5)"; e.currentTarget.style.background = "rgba(204,107,69,0.06)" }}
-                  onBlur={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--secondary)" }}
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.txt,.md,.docx"
+                  className="hidden"
+                  onChange={handleFileChange}
+                  tabIndex={-1}
                 />
+                {/* A real <button>, not a div with an onClick: that version could
+                    only be reached with a mouse — no Tab stop, no Enter or Space,
+                    and nothing for a screen reader to announce. */}
+                <button
+                  type="button"
+                  onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label={
+                    selectedFile
+                      ? `${selectedFile.name} selected. Choose a different file`
+                      : `Choose a file. PDF, DOCX, TXT or MD, up to ${MAX_FILE_MB} megabytes`
+                  }
+                  className={cn(
+                    "w-full rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors",
+                    dragOver || selectedFile
+                      ? "border-brand-edge bg-brand-soft"
+                      : "hover:border-brand-edge hover:bg-list border-border-strong",
+                  )}
+                >
+                  {selectedFile ? (
+                    <>
+                      <FileText className="text-brand-deep mx-auto size-8" />
+                      <p className="mt-3 text-ui-lg font-bold text-foreground">{selectedFile.name}</p>
+                      <p className="mt-1 font-mono text-meta text-ink-subtle">
+                        {(selectedFile.size / 1024).toFixed(0)} KB · tap to change
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mx-auto size-8 text-ink-subtle" />
+                      <p className="mt-3 text-ui-lg font-bold text-foreground">Drop a file here</p>
+                      <p className="mt-1 text-ui text-muted-foreground">
+                        or tap to browse · PDF, DOCX, TXT, MD · up to {MAX_FILE_MB}MB
+                      </p>
+                    </>
+                  )}
+                </button>
               </div>
             )}
 
-            {/* Title */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium" style={{ color: "var(--foreground)" }}>Document Title</label>
-              <input
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                placeholder="Attention Is All You Need"
+            {tab === "url" && (
+              <TextField
+                label="Link to the document"
+                value={urlSource}
+                onChange={e => setUrlSource(e.target.value)}
+                placeholder="https://arxiv.org/pdf/2005.11401"
                 disabled={loading}
-                className="w-full px-3.5 py-2.5 rounded-xl text-base outline-none transition-all"
-                style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}
-                onFocus={e => { e.currentTarget.style.borderColor = "rgba(204,107,69,0.5)"; e.currentTarget.style.background = "rgba(204,107,69,0.06)" }}
-                onBlur={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "var(--secondary)" }}
+              />
+            )}
+
+            <TextField
+              label="What should it be called?"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="Attention Is All You Need"
+              disabled={loading}
+              hint="This is the name you will see beside every citation from it."
+            />
+
+            <div className="space-y-2">
+              <label htmlFor="ingest-domain" className="block text-ui font-bold text-foreground">
+                Domain
+              </label>
+              <DomainSelect
+                id="ingest-domain"
+                value={domain}
+                onChange={setDomain}
+                disabled={loading}
+                className="h-12 w-full rounded-lg"
               />
             </div>
 
-            {/* Domain */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium" style={{ color: "var(--foreground)" }}>Domain</label>
-              <select
-                value={domain}
-                onChange={e => setDomain(e.target.value)}
-                disabled={loading}
-                className="w-full px-3.5 py-2.5 rounded-xl text-base outline-none transition-all appearance-none cursor-pointer"
-                style={{ background: "var(--secondary)", border: "1px solid var(--border)", color: "var(--foreground)" }}
-              >
-                {DOMAINS.map(d => (
-                  <option key={d.value} value={d.value} style={{ background: "var(--card)" }}>{d.label}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Submit */}
             <button
+              type="button"
               onClick={handleSubmit}
-              disabled={loading || !title.trim() || (tab === "file" ? !selectedFile : !urlSource.trim())}
-              className="w-full py-3 rounded-xl text-base font-semibold text-white transition-all"
-              style={loading || !title.trim() || (tab === "file" ? !selectedFile : !urlSource.trim()) ? {
-                background: "var(--secondary)", color: "var(--muted-foreground)", cursor: "not-allowed",
-              } : {
-                background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)",
-                boxShadow: "0 4px 20px rgba(204,107,69,0.35)",
-              }}
+              disabled={loading || !canSubmit}
+              className="btn-primary w-full"
             >
               {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  Ingesting…
-                </span>
-              ) : "Ingest Document"}
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Adding it…
+                </>
+              ) : (
+                "Add to my library"
+              )}
             </button>
 
-            {/* Error */}
-            {error && (
-              <div className="rounded-xl px-4 py-3.5 text-sm"
-                style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", color: "#f87171" }}>
-                {error}
-              </div>
-            )}
+            {error && <Notice>{error}</Notice>}
 
-            {/* Result */}
             {result && (() => {
-              const statusMap: Record<string, { bg: string; color: string; label: string }> = {
-                completed: { bg: "rgba(52,211,153,0.08)", color: "#e8845a", label: "Completed" },
-                failed: { bg: "rgba(248,113,113,0.08)", color: "#f87171", label: "Failed" },
-                running: { bg: "rgba(204,107,69,0.08)", color: "#e8845a", label: "Running…" },
-                queued: { bg: "rgba(251,191,36,0.08)", color: "#fbbf24", label: "Queued…" },
-              }
-              const s = statusMap[currentStatus] ?? { bg: "var(--secondary)", color: "var(--muted-foreground)", label: currentStatus }
+              const s = STATUS[currentStatus] ?? { tone: "info" as const, label: currentStatus }
+              // Still working states get the same indeterminate bar the query
+              // wait uses, so "something is running" looks the same everywhere in
+              // the app rather than once per screen.
+              const live = currentStatus === "running" || currentStatus === "queued"
               return (
-                <div className="rounded-xl px-4 py-4 space-y-2"
-                  style={{ background: s.bg, border: `1px solid ${s.color}30` }}>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium" style={{ color: "var(--foreground)" }}>Status</span>
-                    <span className="text-sm font-semibold" style={{ color: s.color }}>{s.label}</span>
-                  </div>
-                  {result.taskId && (
-                    <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-                      Task: <code className="font-mono">{result.taskId}</code>
-                    </p>
+                <Notice tone={s.tone}>
+                  <span className="font-bold">{s.label}</span>
+                  {live && <span className="working-bar mt-2 block" />}
+                  {currentStatus === "completed" && (
+                    <span className="mt-1 block font-normal">Head back to Ask and question it.</span>
                   )}
-                  {result.documentId && (
-                    <p className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-                      Doc ID: <code className="font-mono">{result.documentId}</code>
-                    </p>
+                  {(result.taskId ?? result.documentId) && (
+                    <span className="mt-1 block font-mono text-meta break-all opacity-75">
+                      {result.taskId ? `task ${result.taskId}` : `doc ${result.documentId}`}
+                    </span>
                   )}
-                </div>
+                </Notice>
               )
             })()}
           </div>
         </div>
-      </div>
+      </main>
     </div>
   )
 }
-
-
-

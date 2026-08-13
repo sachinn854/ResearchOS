@@ -3,92 +3,569 @@
 @import "shadcn/tailwind.css";
 @plugin "@tailwindcss/typography";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant light (&:where(.light, .light *));
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+/* ===========================================================================
+   Warm neutrals, one ink accent.
+
+   The palette survived a redesign that the layout did not, which is worth saying
+   plainly: the colours were never the problem. What went was everything built on
+   top of them — speech bubbles, an avatar beside every answer, generated
+   thumbnails, count badges, a green pill for each retrieval method, and a set of
+   animated borders and background textures. That set made a research tool look
+   like a messaging app, and it buried the one thing this product has that a
+   chatbot does not: the passage each claim came from.
+
+   What the tokens carry now is a document. Cream is the page, near-white is
+   anything lifted off it, and a single deep navy does every accent job — dark
+   enough to set text in as well as fill a shape, which is what lets citation
+   markers, links and buttons all be one colour instead of needing a second.
+
+   Two whole families went with the shapes that used them. The espresso rail is
+   gone with the icon column it was, and green went with the count badges it
+   existed for; --success remains, because a finished ingest still needs to say
+   so.
+
+   Both themes are solved the same way and neither is a flip of the other: every
+   ink is measured against the *worst* surface it can actually land on — which is
+   usually one of the tinted washes, not the page — and nothing dimmer than
+   4.5:1 ships. That is why the two lists below do not line up row for row.
+
+   The dark half is built in OKLCH rather than picked as hex; the reason is in
+   the comment on .dark, and it is the difference between a dark theme and a
+   brown one.
+   =========================================================================== */
+
+:root, .light {
+  /* Four warm neutral steps, not two. Depth in the neutrals is what a palette
+     with one accent has instead of a second accent, and the previous set had the
+     page and the raised surfaces almost the same value — so nothing read as
+     lifted off anything. */
+  --canvas: #f4f1ea;         /* the page */
+  --card: #fcfaf6;           /* lifted: the evidence rail, the history panel */
+  --list: #e9e4d9;           /* recessed: quoted passages, the composer */
+  --popover: #fcfaf6;
+  --secondary: #e9e4d9;
+  --muted: #efebe2;
+  --surface-raised: #e9e4d9;
+  --accent: #e3ddd0;         /* shadcn semantics: hover surface, NOT the brand */
+
+  --foreground: #241d18;         /* 12.68:1 on the worst tinted surface */
+  --card-foreground: #241d18;
+  --popover-foreground: #241d18;
+  --secondary-foreground: #382e27;
+  --accent-foreground: #241d18;
+  --muted-foreground: #665950;   /* 5.15:1 */
+  --ink-subtle: #6e6158;         /* 4.56:1 — the dimmest ink allowed anywhere */
+
+  /* One accent, and it is ink rather than a colour: deep enough to set text in
+     (7.76:1 at worst) as well as fill a shape, which is what lets citation
+     markers, links and buttons all be the same thing. */
+  --primary: #28436c;
+  --primary-foreground: #f7f3ec;  /* 9.00:1 on the fill */
+  --brand-deep: #28436c;
+  --brand-soft: rgba(40, 67, 108, 0.08);
+  --brand-edge: rgba(40, 67, 108, 0.24);
+
+  --destructive: #a83527;        /* 5.00:1 on its own 10% wash */
+  --destructive-foreground: #fcfaf6;
+  --success: #486825;            /* 4.95:1 */
+  --warning: #85560c;            /* 4.87:1 */
+
+  --border: #e2dbcd;
+  --border-strong: #cec5b4;
+  --input: #e2dbcd;
+  --ring: rgba(40, 67, 108, 0.45);
+
+  --elevation-column: 0 1px 2px rgba(36, 29, 24, 0.04), 0 12px 32px -16px rgba(36, 29, 24, 0.16);
+  --elevation-lift: 0 1px 2px rgba(36, 29, 24, 0.05), 0 4px 14px -6px rgba(36, 29, 24, 0.12);
+
+  /* Tightened from 14px. A generous radius reads as friendly, which is the note
+     a consumer app wants; at 10px the corners are still soft but the shapes stay
+     precise, and precision is the note here. */
+  --radius: 0.625rem;
 }
 
-:root {
-  --background: #1a1917;
-  --foreground: #ede8e0;
-  --card: #201f1c;
-  --card-foreground: #ede8e0;
-  --popover: #201f1c;
-  --popover-foreground: #ede8e0;
-  --primary: #cc6b45;
-  --primary-foreground: #ffffff;
-  --secondary: #252420;
-  --secondary-foreground: #a09890;
-  --muted: #1e1d1a;
-  --muted-foreground: #7a7369;
-  --accent: #2a2824;
-  --accent-foreground: #ede8e0;
-  --destructive: #e55757;
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.05);
-  --ring: #cc6b45;
-  --radius: 0.75rem;
-  --sidebar: #141412;
-  --sidebar-foreground: #a09890;
-  --sidebar-primary: #cc6b45;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #1e1d1a;
-  --sidebar-accent-foreground: #ede8e0;
-  --sidebar-border: rgba(255, 255, 255, 0.06);
-  --sidebar-ring: #cc6b45;
+.dark {
+  /* Built in OKLCH, not picked as hex. The previous set carried a chroma of
+     0.013–0.023 at these lightnesses, which at near-black does not read as
+     "warm" — it reads as brown, and brown surfaces under a cool blue accent look
+     like two themes fighting. These sit at 0.005–0.007: enough warmth to belong
+     with the cream light theme, not enough to be a colour.
+
+     The steps are spaced by perceptual lightness rather than by eye. Below about
+     0.03 apart, two dark surfaces are simply the same surface. */
+  --canvas: #171513;         /* the page */
+  --list: #201e1c;           /* recessed: quoted passages, the composer */
+  --card: #292624;           /* lifted: the evidence rail, the history panel */
+  --popover: #34312e;
+  --secondary: #201e1c;
+  --muted: #1b1917;
+  --surface-raised: #34312e;
+  --accent: #34312e;
+
+  --foreground: #f0ede8;         /* 10.27:1 on the worst tinted surface */
+  --card-foreground: #f0ede8;
+  --popover-foreground: #f0ede8;
+  --secondary-foreground: #d5d0c9;
+  --accent-foreground: #f0ede8;
+  --muted-foreground: #b8b3ac;   /* 5.76:1 */
+  --ink-subtle: #a39e97;         /* 4.51:1 */
+
+  /* The light theme's accent, lifted to read on a dark ground: same hue to
+     within half a degree, so the two themes are one colour at two lightnesses
+     rather than two different blues. */
+  --primary: #87acea;
+  --primary-foreground: #122036;  /* 7.09:1 on the fill */
+  --brand-deep: #87acea;          /* 5.24:1 at worst */
+  --brand-soft: rgba(135, 172, 234, 0.12);
+  --brand-edge: rgba(135, 172, 234, 0.28);
+
+  --destructive: #ed7871;        /* 4.63:1 on its own 10% wash */
+  --destructive-foreground: #201e1c;
+  --success: #96da87;            /* 7.24:1 */
+  --warning: #eab55d;            /* 6.54:1 */
+
+  --border: #383532;
+  --border-strong: #4c4844;
+  --input: #383532;
+  --ring: rgba(135, 172, 234, 0.5);
+
+  --elevation-column: 0 1px 2px rgba(0, 0, 0, 0.45), 0 16px 40px -20px rgba(0, 0, 0, 0.75);
+  --elevation-lift: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-list: var(--list);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-edge: var(--brand-edge);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-surface-raised: var(--surface-raised);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ink-subtle: var(--ink-subtle);
+
+  /* Read versus operate. The serif carries answers and the questions that head
+     them; the grotesque carries every control around them; the mono carries any
+     number that changes in place. The variable names differ from the theme keys
+     on purpose — a key pointing at a custom property of its own name is a
+     circular reference that silently resolves to nothing. */
+  --font-serif: var(--font-source-serif), ui-serif, Georgia, serif;
+  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-dm-mono), ui-monospace, monospace;
+
+  --text-meta: 0.6875rem;
+  --text-meta--line-height: 1.4;
+  --text-data: 0.8125rem;
+  --text-data--line-height: 1.5;
+  --text-ui: 0.875rem;
+  --text-ui--line-height: 1.5;
+  --text-ui-lg: 0.9375rem;
+  --text-ui-lg--line-height: 1.5;
+  /* Answer prose. 17px rather than 16: the serif has a smaller x-height than
+     the grotesque around it, so matching their point sizes would not match their
+     apparent sizes. .prose-answer loosens the leading further, because a screen
+     of continuous reading needs more air than a paragraph of interface copy. */
+  --text-read: 1.0625rem;
+  --text-read--line-height: 1.65;
+  --text-title-sm: 1.125rem;        /* the wordmark */
+  --text-title-sm--line-height: 1.35;
+  --text-title: 1.375rem;
+  --text-title--line-height: 1.3;
+  --text-title-lg: 1.75rem;         /* a question, set as the heading of its answer */
+  --text-title-lg--line-height: 1.2;
+  --text-display: 2.25rem;          /* the opening screen, and the ingest page */
+  --text-display--line-height: 1.1;
+
+  /* Named --elevation-* in :root so these theme keys are not circular. */
+  --shadow-column: var(--elevation-column);
+  --shadow-lift: var(--elevation-lift);
+
+  --radius-sm: calc(var(--radius) * 0.4);
+  --radius-md: calc(var(--radius) * 0.64);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.9);
+  --radius-3xl: calc(var(--radius) * 2.4);
+  --radius-4xl: calc(var(--radius) * 3);
 }
 
 @layer base {
   html {
     font-size: 16px;
+    color-scheme: light;
     @apply antialiased;
   }
-  * {
-    @apply border-border outline-ring/50;
-  }
+  html.dark { color-scheme: dark; }
+
+  * { @apply border-border; }
+
   body {
-    background: var(--background);
+    background: var(--canvas);
     color: var(--foreground);
-    font-family: var(--font-geist-sans), system-ui, sans-serif;
+    font-family: var(--font-sans);
+    /* No negative tracking here any more. The -0.01em was compensating for a
+       geometric sans set loose by default; a grotesque is already spaced for
+       interface sizes, and tightening it only closes the counters. */
+  }
+
+  /* Counts, scores and timers must not shift as they change. */
+  code, kbd, samp, pre, [class*="font-mono"] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 22%, transparent);
+    color: var(--foreground);
+  }
+
+
+  /* No border-radius here: an outline already follows the element's own corners,
+     and setting one reshapes the element while it holds focus. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+@layer components {
+
+  /* --- the columns ------------------------------------------------------- */
+
+  /* The last floating panel in the app. Every other surface is now a region of
+     one page separated by a hairline, which is what a tool looks like; the sign-in
+     card is genuinely a single object on an empty field, so it still floats. */
+  .column {
+    @apply rounded-2xl border border-border;
+    box-shadow: var(--elevation-column);
+  }
+
+  /* --- type roles ------------------------------------------------------- */
+
+  /* Set in the text face, not the interface one. A heading cut from the same
+     face as the prose under it belongs to that prose; cut from the chrome face,
+     it belongs to the toolbar. */
+  .font-display {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    letter-spacing: -0.014em;
+  }
+
+  /* Small, uppercase, widely tracked. Caps set at their default spacing look
+     cramped at this size, which is why every small-caps label in print is
+     letterspaced. */
+  .label-meta {
+    @apply text-meta font-semibold uppercase text-ink-subtle;
+    font-family: var(--font-sans);
+    letter-spacing: 0.11em;
+  }
+
+  /* --- list rows -------------------------------------------------------- */
+
+  /* --- controls --------------------------------------------------------- */
+
+  .field {
+    @apply w-full rounded-lg border border-input bg-card px-4 py-3 text-ui-lg text-foreground
+           transition-colors duration-150 outline-none
+           placeholder:text-ink-subtle
+           hover:border-border-strong
+           focus:border-brand-edge
+           disabled:cursor-not-allowed disabled:opacity-55;
+  }
+
+  /* The primary action. 9.00:1. */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5
+           text-ui-lg font-semibold text-primary-foreground
+           transition-colors duration-150
+           active:translate-y-px
+           disabled:pointer-events-none disabled:bg-surface-raised disabled:text-ink-subtle;
+  }
+  /* A mixed colour rather than a brightness filter. brightness() multiplies
+     every channel, so the same hover looks like a different amount of change in
+     each theme — and on the dark theme's light accent it washed out instead of
+     deepening. */
+  .btn-primary:not(:disabled):hover {
+    background: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+  }
+
+  /* A secondary action that takes no accent area. */
+  .btn-soft {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-list
+           px-4 py-2.5 text-ui-lg font-semibold text-foreground transition-colors
+           hover:border-border-strong hover:bg-card;
+  }
+
+  .btn-quiet {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-ui
+           text-muted-foreground transition-colors duration-150
+           hover:bg-surface-raised hover:text-foreground;
+  }
+
+  .link-primary {
+    @apply font-semibold text-brand-deep underline decoration-brand-edge decoration-1
+           underline-offset-2 transition-colors hover:decoration-current;
+  }
+
+  /* --- the exchange ------------------------------------------------------
+     No bubbles and no avatar. This was a chat transcript and it should not have
+     been: what a person does here is ask a question and then read a cited
+     document about it, and a bubble is a container for a remark. The bubbles
+     also fought the content — a markdown table inside a rounded speech shape
+     with 85% max-width has nowhere to go.
+
+     What replaces them is the shape of a reference answer: the question set as a
+     heading, the evidence named directly under it, then the prose. */
+
+  /* The question. Large enough to open a section, and it wraps at the reading
+     measure rather than the panel width so a long question does not run to four
+     hundred pixels wider than the answer below it. */
+  .q-heading {
+    @apply text-title-lg text-foreground;
+    /* The face and tracking are repeated rather than @apply-ing .font-display:
+       @apply only reaches utilities, and .font-display is a component class in
+       this same layer. */
+    font-family: var(--font-serif);
+    font-weight: 600;
+    letter-spacing: -0.014em;
+    text-wrap: balance;
+  }
+
+  /* One retrieved passage, numbered to match the marker in the prose. Fixed
+     width so a row of them is a row and not a ragged set of boxes sized by
+     however long each paper's title happens to be. */
+  .source-card {
+    @apply flex w-56 shrink-0 flex-col gap-1 rounded-lg border border-border bg-list px-3 py-2.5
+           text-left transition-colors hover:border-border-strong;
+  }
+  .source-card[aria-expanded="true"] {
+    @apply border-brand-edge;
+    background: var(--brand-soft);
+  }
+
+  /* The numeral on a source card, and the same shape used inline in the prose. */
+  .source-index {
+    @apply grid size-[18px] shrink-0 place-items-center rounded-[5px] bg-brand-soft
+           font-mono text-[10px] font-semibold text-brand-deep;
+  }
+
+  /* An inline citation. Baseline-shifted rather than a real <sup>, because <sup>
+     inside a paragraph at 1.75 line-height leaves the marker floating halfway to
+     the line above. */
+  .cite-mark {
+    @apply relative mx-px inline-grid size-[17px] translate-y-[-1px] place-items-center rounded-[4px]
+           bg-brand-soft align-baseline font-mono text-[10px] font-semibold text-brand-deep
+           transition-colors;
+  }
+  .cite-mark:hover {
+    @apply bg-primary text-primary-foreground;
+  }
+
+  /* Answers get quoted out of this app constantly — into notes, into a paper.
+     Copying a passage should not paste bare digits jammed against words, so the
+     brackets are restored to the clipboard.
+
+     Absolute, and the marker above is relative, for a reason beyond hiding them:
+     .cite-mark is an inline-grid, and an in-flow pseudo-element would become a
+     third grid item and knock the number off centre. */
+  .cite-mark::before { content: " ["; }
+  .cite-mark::after { content: "] "; }
+  .cite-mark::before,
+  .cite-mark::after {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  /* The passage itself, opened under the row rather than inside a card, so a long
+     quote never reflows the row it was opened from. */
+  .passage {
+    @apply rounded-lg border border-border bg-list px-4 py-3 font-mono text-data
+           whitespace-pre-wrap text-muted-foreground;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Answers render through react-markdown, so the prose plugin's palette is wired
+   to our tokens.
+   --------------------------------------------------------------------------- */
+.prose-answer {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-lead: var(--muted-foreground);
+  --tw-prose-links: var(--brand-deep);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: var(--ink-subtle);
+  --tw-prose-bullets: var(--border-strong);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--muted-foreground);
+  --tw-prose-quote-borders: var(--brand-edge);
+  --tw-prose-captions: var(--ink-subtle);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-code: var(--foreground);
+  --tw-prose-pre-bg: var(--card);
+  --tw-prose-th-borders: var(--border-strong);
+  --tw-prose-td-borders: var(--border);
+}
+
+/* Reading settings, not decoration. 1.75 is loose for interface text and correct
+   for a screen of continuous prose — these answers run to several paragraphs
+   with tables in them, which is reading, not scanning. */
+.prose-answer {
+  font-family: var(--font-serif);
+  font-size: var(--text-read);
+  line-height: 1.72;
+  /* Old-style figures would be prettier and are wrong here: these paragraphs are
+     full of years, percentages and scores that have to line up with the same
+     numbers in the evidence rail beside them. */
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.prose-answer :where(h1, h2, h3) {
+  font-weight: 700;
+  letter-spacing: -0.022em;
+}
+
+/* Answers arrive with real tables in them. Inside the reading measure a table
+   has nowhere to go, so it gets its own scroller rather than forcing the whole
+   column wider or being clipped. */
+.prose-answer :where(table) {
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+  font-size: var(--text-ui-lg);
+}
+
+.prose-answer :where(pre, code, kbd, samp) {
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+.prose-answer :where(code):not(:where(pre code)) {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.34em;
+  font-size: 0.85em;
+}
+.prose-answer :where(code):not(:where(pre code))::before,
+.prose-answer :where(code):not(:where(pre code))::after { content: none; }
+
+.prose-answer :where(pre) { border: 1px solid var(--border); }
+
+/* ---------------------------------------------------------------------------
+   Motion. Message arrival, the wait, and state feedback. Nothing decorative.
+   --------------------------------------------------------------------------- */
+
+/* An exchange lands from slightly below, once. No scale: the previous version
+   grew the block into place, and on a screen of text that reads as the page
+   settling rather than as content arriving. */
+@keyframes exchange-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-exchange-in { animation: exchange-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* The wait before the first token. A segment travelling a hairline track, not
+   three bouncing dots: dots are the convention for a person typing, and nothing
+   here is typing — the question is being run against every paper. An
+   indeterminate bar is what a system doing work looks like. */
+@keyframes working-sweep {
+  0%   { left: -35%; width: 35%; }
+  55%  { left: 45%;  width: 45%; }
+  100% { left: 100%; width: 25%; }
+}
+.working-bar {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--border);
+}
+.working-bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--primary);
+  border-radius: inherit;
+  animation: working-sweep 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+/* Tells a finished answer apart from one still arriving. */
+@keyframes caret-pulse {
+  0%, 45% { opacity: 1; }
+  55%, 100% { opacity: 0.15; }
+}
+.stream-caret::after {
+  content: "";
+  display: inline-block;
+  width: 0.5rem;
+  height: 1.05em;
+  margin-left: 0.12em;
+  vertical-align: text-bottom;
+  border-radius: 2px;
+  background: var(--primary);
+  animation: caret-pulse 1.15s steps(1, end) infinite;
+}
+
+/* Suggestion chips arriving. Overshoots past 1 and settles. */
+@keyframes emoji-pop {
+  0%   { opacity: 0; transform: scale(0.3) translateY(6px); }
+  62%  { opacity: 1; transform: scale(1.16) translateY(0); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.animate-emoji-pop { animation: emoji-pop 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-exchange-in,
+  .animate-emoji-pop,
+  .stream-caret::after { animation: none; }
+  /* The bar carries no information on its own — the seconds counter beside it
+     does — so with motion off it becomes a static rule rather than a full track
+     that would read as "complete". */
+  .working-bar::after { animation: none; width: 30%; }
+}
+
+/* Only while the theme toggle is mid-swap; left on it would lag every hover. */
+[data-theme-transition] * {
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease !important;
+}
+
+::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  /* Transparent border shrinks the visible thumb without shrinking the hit
+     area, so it stays grabbable while looking like a hairline. */
+  border: 4px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-subtle);
+  background-clip: content-box;
+}

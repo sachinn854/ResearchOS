@@ -1,31 +1,27 @@
-﻿"use client"
+"use client"
 
 import { useEffect, useRef, useState } from "react"
-import Link from "next/link"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
+import { ArrowUp, Loader2 } from "lucide-react"
+
+import { Exchange } from "@/components/exchange"
+import { HistoryPanel } from "@/components/history-panel"
+import { Notice } from "@/components/notice"
+import { SourceList } from "@/components/source-list"
+import { TopBar } from "@/components/top-bar"
 import {
   queryKBStream, fetchSessions, fetchSessionMessages,
   RateLimitError, type PipelineInfo, type SourceItem, type SessionItem,
 } from "@/lib/api"
 import { useAuth } from "@/lib/auth-context"
-
-const DOMAINS = [
-  { value: "all", label: "All Domains", icon: "◈" },
-  { value: "ml", label: "ML / AI", icon: "⬡" },
-  { value: "dl", label: "Deep Learning", icon: "◉" },
-  { value: "cs", label: "Computer Science", icon: "⬢" },
-  { value: "physics", label: "Physics", icon: "◎" },
-  { value: "bio", label: "Biology", icon: "◌" },
-  { value: "finance", label: "Finance", icon: "◆" },
-  { value: "math", label: "Mathematics", icon: "△" },
-]
+import { ALL_DOMAINS } from "@/lib/domains"
+import { replaceTrailingEmoticon, suggestEmoji } from "@/lib/emoji"
+import { cn } from "@/lib/utils"
 
 const EXAMPLE_QUERIES = [
-  "What are the main approaches to reduce hallucinations in RAG systems?",
-  "How does retrieval augmented generation compare to fine-tuning?",
-  "Explain attention mechanisms in transformers.",
-  "Limitations of current LLM evaluation benchmarks?",
+  "What are the main approaches to reducing hallucination in RAG systems?",
+  "How does retrieval-augmented generation compare with fine-tuning?",
+  "Explain the attention mechanism in transformers.",
+  "What are the limitations of current LLM evaluation benchmarks?",
 ]
 
 interface Message {
@@ -40,37 +36,38 @@ function randomId() {
   return Math.random().toString(36).slice(2, 10)
 }
 
-function timeAgo(isoStr: string | null): string {
-  if (!isoStr) return ""
-  const diff = Date.now() - new Date(isoStr).getTime()
-  const m = Math.floor(diff / 60000)
-  if (m < 1) return "just now"
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
-}
-
 export default function ChatPage() {
-  // user and the auth check now come from the shared provider, which verified
-  // the token against /auth/me instead of reading a cached object out of
-  // localStorage.
-  const { user, loading: authLoading, logout } = useAuth()
+  // user and the auth check come from the shared provider, which verified the
+  // token against /auth/me rather than reading a cached object out of localStorage.
+  const { user, loading: authLoading } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
-  const [domain, setDomain] = useState("all")
+  const [domain, setDomain] = useState(ALL_DOMAINS)
   const [loading, setLoading] = useState(false)
   const [waitSeconds, setWaitSeconds] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessions, setSessions] = useState<SessionItem[]>([])
-  const [showSources, setShowSources] = useState<Record<number, boolean>>({})
-  const [expandedChunk, setExpandedChunk] = useState<string | null>(null)
+  // Distinguishes "this account has no conversations" from "the request for them
+  // failed". Both used to render as an empty list, so a 500 from
+  // /research/sessions was indistinguishable from an empty history.
+  const [sessionsFailed, setSessionsFailed] = useState(false)
   const [rateLimitSeconds, setRateLimitSeconds] = useState<number | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  // Which passage is open, and which answer's evidence the rail is showing.
+  // Both live here rather than inside an exchange, because a citation in the
+  // prose and a card in the rail are two controls for one piece of state and
+  // they sit in different components.
+  const [openSource, setOpenSource] = useState<number | null>(null)
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null)
   const rateLimitTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const streamAbortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Recomputed on every keystroke, which is cheap: eight regexes against one
+  // short string, and it stops after three matches.
+  const emojiHints = suggestEmoji(input)
 
   useEffect(() => {
     // Wait for the provider to finish checking the token. Redirecting while
@@ -80,15 +77,15 @@ export default function ChatPage() {
 
     if (!user) { window.location.href = "/login"; return }
 
-    // Session ids are still prefixed with the user id so that a browser shared
-    // by two people does not resume the other person's chat. Ownership itself is
+    // Session ids stay prefixed with the user id so a browser shared by two
+    // people does not resume the other person's conversation. Ownership itself is
     // no longer inferred from this string — the backend stores a real user_id
     // column and filters on the token's user.
     const stored = localStorage.getItem("ros_session_id")
     const id = (stored && stored.startsWith(user.id + "_")) ? stored : `${user.id}_${randomId()}`
     localStorage.setItem("ros_session_id", id)
     setSessionId(id)
-    fetchSessions().then(setSessions).catch(() => {})
+    loadSessions()
   }, [authLoading, user])
 
   useEffect(() => {
@@ -96,10 +93,9 @@ export default function ChatPage() {
   }, [messages])
 
   // Count the seconds a query has been in flight. Nothing appears on screen
-  // between pressing send and the first streamed token, and that gap is real
-  // work — several searches over the papers, then verification passes before any
-  // text is allowed out. Bouncing dots alone left people wondering whether the
-  // request had died, so the wait is labelled and counted instead.
+  // between pressing send and the first streamed token, and that gap is real work
+  // — several searches over the papers, then verification before any text is let
+  // out. Dots alone made people think the request had died.
   useEffect(() => {
     if (!loading) {
       setWaitSeconds(0)
@@ -109,21 +105,27 @@ export default function ChatPage() {
     return () => clearInterval(timer)
   }, [loading])
 
-  async function refreshSessions() {
-    if (!user) return
-    try { setSessions(await fetchSessions()) } catch { /* non-critical */ }
+  async function loadSessions() {
+    try {
+      setSessions(await fetchSessions())
+      setSessionsFailed(false)
+    } catch {
+      // Deliberately does not clear `sessions`: if a refresh fails we would
+      // rather keep the list we already have than blank the column.
+      setSessionsFailed(true)
+    }
   }
 
   async function loadSession(id: string) {
     if (streamAbortRef.current) { streamAbortRef.current.abort(); streamAbortRef.current = null }
-    setError(null); setShowSources({}); setExpandedChunk(null)
+    setError(null); setHistoryOpen(false); setOpenSource(null); setFocusedIndex(null)
     try {
       const msgs = await fetchSessionMessages(id)
       setMessages(msgs.map(m => ({ role: m.role, content: m.content })))
       setSessionId(id)
       localStorage.setItem("ros_session_id", id)
     } catch {
-      setError("Failed to load session")
+      setError("That conversation could not be opened. Try another, or start a new one.")
     }
   }
 
@@ -132,21 +134,40 @@ export default function ChatPage() {
     const id = `${user!.id}_${randomId()}`
     localStorage.setItem("ros_session_id", id)
     setSessionId(id)
-    setMessages([]); setError(null); setShowSources({}); setExpandedChunk(null)
+    setMessages([]); setError(null); setHistoryOpen(false); setOpenSource(null); setFocusedIndex(null)
   }
 
-  function handleLogout() {
-    if (streamAbortRef.current) { streamAbortRef.current.abort() }
-    logout()
-    window.location.href = "/login"
+  /** Grows the textarea to fit its content, capped. Shared by typing and by the
+   *  emoji rail, which also changes the value. */
+  function autoGrow(el: HTMLTextAreaElement) {
+    el.style.height = "auto"
+    el.style.height = Math.min(el.scrollHeight, 176) + "px"
+  }
+
+  function appendEmoji(emoji: string) {
+    const el = textareaRef.current
+    setInput(prev => {
+      const next = prev.endsWith(" ") || prev === "" ? prev + emoji : prev + " " + emoji
+      // Focus back to the input so the rail never steals the caret — tapping a
+      // reaction and then having to click the field again is the whole reason
+      // emoji pickers feel clunky.
+      if (el) window.requestAnimationFrame(() => { el.focus(); autoGrow(el) })
+      return next
+    })
   }
 
   async function handleSubmit(query?: string) {
     const q = (query ?? input).trim()
     if (!q || loading) return
+
     setInput("")
     if (textareaRef.current) textareaRef.current.style.height = "auto"
     setError(null)
+    // Hand the rail back to the newest answer. Without this, asking a follow-up
+    // after opening a citation three answers up leaves the evidence column
+    // showing that old answer's passages while a new one streams beside it.
+    setFocusedIndex(null)
+    setOpenSource(null)
     setMessages(prev => [...prev, { role: "user", content: q }])
     setLoading(true)
     setMessages(prev => [...prev, { role: "assistant", content: "" }])
@@ -155,7 +176,7 @@ export default function ChatPage() {
       const abortCtrl = new AbortController()
       streamAbortRef.current = abortCtrl
       await queryKBStream(
-        { query: q, domain: domain === "all" ? null : domain, session_id: sessionId ?? undefined },
+        { query: q, domain: domain === ALL_DOMAINS ? null : domain, session_id: sessionId ?? undefined },
         (event) => {
           if (event.type === "token") {
             setMessages(prev => {
@@ -186,7 +207,7 @@ export default function ChatPage() {
         abortCtrl.signal,
       )
       streamAbortRef.current = null
-      refreshSessions()
+      loadSessions()
     } catch (err) {
       setMessages(prev => prev.slice(0, -1))
       if (err instanceof RateLimitError) {
@@ -199,7 +220,7 @@ export default function ChatPage() {
           })
         }, 1000)
       } else {
-        setError(err instanceof Error ? err.message : "Something went wrong")
+        setError(err instanceof Error ? err.message : "The question did not go through. Try sending it again.")
       }
     } finally {
       setLoading(false)
@@ -210,428 +231,258 @@ export default function ChatPage() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit() }
   }
 
-  function toggleSources(idx: number) {
-    setShowSources(prev => ({ ...prev, [idx]: !prev[idx] }))
+  // Blank while the token is being verified, and also once we know there is no
+  // user — the effect above is already redirecting, and rendering the app for a
+  // split second first would flash a signed-in layout at someone who is not.
+  if (authLoading || !user) {
+    return <div className="bg-canvas h-dvh" />
   }
 
-  // Blank screen while the token is being verified, and also once we know there
-  // is no user — in that case the effect above is already redirecting, and
-  // rendering the chat UI for a split second first would flash a signed-in
-  // layout at someone who is not signed in.
-  if (authLoading || !user) {
-    return <div className="h-screen" style={{ background: "var(--background)" }} />
-  }
+  const inputDisabled = rateLimitSeconds !== null
+
+  const composer = (
+    <>
+      {/* Reads what is being typed and offers a couple of emoji for it. Hidden
+          entirely when there is nothing to suggest, so it never occupies space it
+          has not earned. */}
+      {emojiHints.length > 0 && !inputDisabled && (
+        <div className="mb-2 flex items-center gap-1.5">
+          {emojiHints.map((e, i) => (
+            <button
+              key={e}
+              type="button"
+              onClick={() => appendEmoji(e)}
+              aria-label={`Add ${e} to your question`}
+              className="animate-emoji-pop bg-list grid size-9 place-items-center rounded-full border border-border text-lg transition-transform hover:scale-110 active:scale-95"
+              style={{ animationDelay: `${i * 55}ms` }}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* The paper-plane glyph that used to sit on the left is gone: the send
+          button on the right already says what this box does, and two send icons
+          on one control is one of them decorating. */}
+      <div className="bg-list flex items-end gap-2 rounded-xl border border-border py-2 pr-2 pl-4 transition-colors focus-within:border-brand-edge">
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={e => {
+            // Emoticon → emoji. Only ever rewrites the tail of the string, so the
+            // caret cannot be yanked out from under someone editing earlier text.
+            setInput(replaceTrailingEmoticon(e.target.value))
+            autoGrow(e.target)
+          }}
+          onKeyDown={onKeyDown}
+          placeholder={
+            inputDisabled
+              ? "Rate limit reached — the countdown above shows when you can ask again"
+              : "Ask a question about your papers…"
+          }
+          rows={1}
+          disabled={loading || inputDisabled}
+          aria-label="Your question"
+          className="flex-1 resize-none bg-transparent py-2 text-read text-foreground outline-none placeholder:text-ink-subtle disabled:text-muted-foreground"
+          // Inline rather than utilities because the auto-grow handler above
+          // writes style.height directly — keeping all three height values in one
+          // place is what stops them contradicting.
+          style={{ minHeight: "40px", maxHeight: "176px" }}
+        />
+        <button
+          type="button"
+          onClick={() => handleSubmit()}
+          disabled={loading || !input.trim()}
+          aria-label="Send question"
+          className="btn-primary size-9 shrink-0 rounded-lg p-0"
+        >
+          {loading ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+        </button>
+      </div>
+    </>
+  )
+
+
+
+  // The transcript is stored as the alternating list the API returns; the screen
+  // is a list of exchanges. Pairing them here keeps that difference in one place
+  // instead of threading "is the next message the answer to this one" through the
+  // render.
+  const exchanges = pairMessages(messages)
+  const lastIndex = exchanges.length - 1
+
+  // Which answer the evidence rail is showing. It follows the newest one until
+  // you touch an older answer's citation, because during a stream that is the
+  // one being read, and after it that is still the one being read.
+  const railIndex = focusedIndex ?? lastIndex
+  const railExchange = exchanges[railIndex]
 
   return (
-    <div className="flex h-screen" style={{ background: "var(--background)", color: "var(--foreground)" }}>
+    <div className="bg-canvas flex h-dvh flex-col">
+      <TopBar
+        active="chat"
+        onOpenHistory={() => setHistoryOpen(true)}
+        historyCount={sessions.length}
+        domain={domain}
+        onDomainChange={setDomain}
+      />
 
-      {/* Sidebar */}
-      <aside className="w-60 shrink-0 flex flex-col" style={{ background: "var(--sidebar)", borderRight: "1px solid var(--sidebar-border)" }}>
+      <HistoryPanel
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        sessions={sessions}
+        activeSessionId={sessionId}
+        sessionsFailed={sessionsFailed}
+        onRetry={loadSessions}
+        onSelect={loadSession}
+        onNewChat={startNewChat}
+      />
 
-        {/* Logo + New Chat */}
-        <div className="px-4 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid var(--sidebar-border)" }}>
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-sm font-bold"
-              style={{ background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)" }}>
-              R
-            </div>
-            <span className="font-semibold text-[14px]" style={{ color: "var(--foreground)" }}>ResearchOS</span>
-          </div>
-          <button
-            onClick={startNewChat}
-            title="New Chat"
-            className="w-7 h-7 rounded-lg flex items-center justify-center transition-all text-base leading-none"
-            style={{ color: "var(--muted-foreground)", border: "1px solid var(--border)" }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = "rgba(204,107,69,0.15)"; el.style.color = "#e8845a"; el.style.borderColor = "rgba(204,107,69,0.4)" }}
-            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = ""; el.style.color = "var(--muted-foreground)"; el.style.borderColor = "var(--border)" }}
-          >
-            +
-          </button>
-        </div>
+      {/* The reading column and the evidence rail are one bounded group, centred
+          together. Letting the rail sit against the window edge and the column
+          float in the middle put four hundred pixels of nothing between a claim
+          and the passage behind it — which is the one adjacency this whole screen
+          exists to create. */}
+      <div className="mx-auto flex min-h-0 w-full max-w-[1320px] flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-9 sm:px-8">
+            <div className="mx-auto w-full max-w-[46rem] xl:mx-0">
+              {exchanges.length === 0 ? (
+                <div className="animate-exchange-in">
+                  <h2 className="font-display text-display text-foreground">
+                    Ask across the papers you have.
+                  </h2>
+                  <p className="mt-3 max-w-lg text-read text-muted-foreground">
+                    Every answer names the passage it came from — with its page and a
+                    relevance score you can open and read.
+                  </p>
 
-        {/* Chat history */}
-        <div className="flex-1 overflow-y-auto py-3">
-          {sessions.length === 0 ? (
-            <p className="px-4 text-xs" style={{ color: "var(--muted-foreground)" }}>No chats yet</p>
-          ) : (
-            <>
-              <p className="text-xs font-semibold uppercase tracking-widest px-4 mb-2" style={{ color: "var(--muted-foreground)" }}>
-                Recent
-              </p>
-              <div className="flex flex-col gap-0.5 px-2">
-                {sessions.map(s => {
-                  const active = s.session_id === sessionId
-                  return (
-                    <button
-                      key={s.session_id}
-                      onClick={() => loadSession(s.session_id)}
-                      className="text-left px-3 py-2.5 rounded-xl text-xs transition-all duration-150 w-full"
-                      style={active ? {
-                        background: "rgba(204,107,69,0.15)",
-                        border: "1px solid rgba(204,107,69,0.2)",
-                      } : { border: "1px solid transparent" }}
-                      onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.04)" }}
-                      onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.background = "" }}
-                    >
-                      <p className="truncate leading-tight font-medium" style={{ color: active ? "#e8845a" : "var(--foreground)" }}>
-                        {s.preview || "Empty chat"}
-                      </p>
-                      <p className="mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-                        {timeAgo(s.last_at)}
-                      </p>
-                    </button>
-                  )
-                })}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Bottom: upload + user + logout */}
-        <div className="px-3 pb-4 pt-3 space-y-1" style={{ borderTop: "1px solid var(--sidebar-border)" }}>
-          <Link href="/ingest" className="block">
-            <button
-              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all duration-150"
-              style={{ color: "var(--sidebar-foreground)" }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.05)" }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "" }}
-            >
-              <span className="text-base leading-none" style={{ color: "#e8845a" }}>↑</span>
-              Upload Document
-            </button>
-          </Link>
-
-          {/* User row */}
-          <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl mt-1" style={{ background: "rgba(204,107,69,0.06)", border: "1px solid rgba(204,107,69,0.1)" }}>
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0"
-              style={{ background: "linear-gradient(135deg, #cc6b45, #e8845a)" }}>
-              {user?.name.charAt(0).toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate" style={{ color: "var(--foreground)" }}>{user?.name}</p>
-              <p className="text-[10px] truncate" style={{ color: "var(--muted-foreground)" }}>{user?.email}</p>
-            </div>
-          </div>
-
-          <button
-            onClick={handleLogout}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs transition-all"
-            style={{ color: "var(--muted-foreground)" }}
-            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = "rgba(248,113,113,0.08)"; el.style.color = "#f87171" }}
-            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = ""; el.style.color = "var(--muted-foreground)" }}
-          >
-            <span className="text-sm leading-none">→</span>
-            Sign out
-          </button>
-        </div>
-      </aside>
-
-      {/* Main */}
-      <div className="flex flex-col flex-1 min-w-0">
-
-        {/* Header */}
-        <div className="shrink-0 h-14 flex items-center px-4 gap-3" style={{ borderBottom: "1px solid var(--border)" }}>
-          <select
-            value={domain}
-            onChange={e => setDomain(e.target.value)}
-            className="text-sm rounded-xl px-3 py-1.5 outline-none cursor-pointer"
-            style={{ background: "var(--card)", border: "1px solid var(--border)", color: "var(--foreground)" }}
-          >
-            {DOMAINS.map(d => (
-              <option key={d.value} value={d.value}>{d.icon} {d.label}</option>
-            ))}
-          </select>
-          {sessionId && (
-            <span className="ml-auto text-xs font-mono opacity-30" style={{ color: "var(--muted-foreground)" }}>
-              #{sessionId.slice(-8)}
-            </span>
-          )}
-        </div>
-
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="max-w-3xl mx-auto px-4 py-8 space-y-8">
-
-            {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center min-h-[55vh] text-center select-none">
-                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6 text-2xl font-bold text-white"
-                  style={{ background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)", boxShadow: "0 8px 40px rgba(204,107,69,0.3)" }}>
-                  R
-                </div>
-                <h1 className="text-2xl font-semibold mb-2" style={{ color: "var(--foreground)" }}>
-                  What do you want to research?
-                </h1>
-                <p className="text-base mb-10 max-w-md leading-relaxed" style={{ color: "var(--muted-foreground)" }}>
-                  Ask anything. The system retrieves, synthesizes, and cites sources — with web fallback when your KB is empty.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
-                  {EXAMPLE_QUERIES.map((q, i) => (
-                    <button
-                      key={i}
-                      onClick={() => handleSubmit(q)}
-                      className="text-left p-4 rounded-xl text-sm leading-relaxed transition-all duration-150"
-                      style={{ background: "var(--card)", border: "1px solid var(--border)", color: "var(--sidebar-foreground)" }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "rgba(204,107,69,0.4)"; (e.currentTarget as HTMLElement).style.color = "var(--foreground)" }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "var(--border)"; (e.currentTarget as HTMLElement).style.color = "var(--sidebar-foreground)" }}
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {messages.map((msg, i) => (
-              <div key={`${msg.role}-${i}-${msg.content.slice(0, 12)}`}>
-                {msg.role === "user" ? (
-                  <div className="flex justify-end">
-                    <div className="max-w-[80%] px-4 py-3 rounded-2xl rounded-tr-sm text-base leading-relaxed text-white"
-                      style={{ background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)" }}>
-                      {msg.content}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold text-white shrink-0"
-                        style={{ background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)" }}>
-                        AI
-                      </div>
-                      <span className="text-sm font-medium" style={{ color: "var(--muted-foreground)" }}>ResearchOS</span>
-                    </div>
-
-                    {msg.content ? (
-                      <div className="pl-10">
-                        <div className="prose prose-invert max-w-none
-                          prose-headings:font-semibold prose-headings:tracking-tight
-                          prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg prose-h4:text-base
-                          prose-h1:mt-6 prose-h2:mt-5 prose-h3:mt-4
-                          prose-p:text-base prose-p:leading-7
-                          prose-strong:font-semibold
-                          prose-ul:text-base prose-ol:text-base prose-li:leading-7
-                          prose-code:text-sm prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md
-                          prose-pre:rounded-xl prose-pre:text-sm
-                          prose-blockquote:text-base
-                          prose-a:no-underline hover:prose-a:underline
-                          prose-hr:my-6
-                          [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-                          style={{
-                            "--tw-prose-body": "var(--foreground)",
-                            "--tw-prose-headings": "var(--foreground)",
-                            "--tw-prose-strong": "var(--foreground)",
-                            "--tw-prose-bullets": "var(--muted-foreground)",
-                            "--tw-prose-counters": "var(--muted-foreground)",
-                            "--tw-prose-links": "#e8845a",
-                            "--tw-prose-code": "#f0c4a8",
-                            "--tw-prose-pre-bg": "var(--card)",
-                            "--tw-prose-pre-code": "#c9d1d9",
-                            "--tw-prose-quotes": "var(--muted-foreground)",
-                            "--tw-prose-quote-borders": "#cc6b45",
-                            "--tw-prose-hr": "var(--border)",
-                          } as React.CSSProperties}
-                        >
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {msg.content}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="pl-10 space-y-2.5">
-                        <div className="flex gap-1.5 items-center h-8">
-                          {[0, 150, 300].map(delay => (
-                            <span key={delay}
-                              className="w-2 h-2 rounded-full animate-bounce"
-                              style={{ background: "#cc6b45", animationDelay: `${delay}ms` }}
-                            />
-                          ))}
-                          <span className="ml-2.5 text-sm" style={{ color: "var(--muted-foreground)" }}>
-                            Working through the papers
-                            {/* Hidden for the first couple of seconds — a counter that
-                                flashes "1s" on a fast answer just looks twitchy. */}
-                            {waitSeconds > 2 && (
-                              <span className="font-mono ml-1.5 opacity-70">{waitSeconds}s</span>
-                            )}
-                          </span>
-                        </div>
-
-                        {/* Only while this query is actually running, and only on the
-                            last message — an older empty message should not claim to
-                            be in progress. */}
-                        {loading && i === messages.length - 1 && (
-                          <p className="text-xs leading-relaxed max-w-lg" style={{ color: "var(--muted-foreground)" }}>
-                            This usually takes 30–60 seconds. Your question is searched across the
-                            full text of every paper, and the answer is checked against its own
-                            sources before any of it is shown — so it is slower than a plain chatbot,
-                            but the citations can be trusted.
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {msg.pipeline && (
-                      <div className="pl-10 flex flex-wrap gap-2 pt-1">
-                        {msg.pipeline.methods.map(m => (
-                          <span key={m} className="text-xs px-2.5 py-1 rounded-full font-medium"
-                            style={{ background: "rgba(204,107,69,0.08)", color: "#e8845a", border: "1px solid rgba(204,107,69,0.15)" }}>
-                            {m}
-                          </span>
-                        ))}
-                        {msg.pipeline.reranked && (
-                          <span className="text-xs px-2.5 py-1 rounded-full font-medium"
-                            style={{ background: "rgba(204,107,69,0.08)", color: "#e8845a", border: "1px solid rgba(204,107,69,0.15)" }}>
-                            RRF Fusion
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {msg.sources && msg.sources.length > 0 && (
-                      <div className="pl-10 pt-1">
+                  <p className="label-meta mt-12 mb-1">Try one of these</p>
+                  {/* A ruled list, not a grid of cards. These are questions to
+                      read, and four boxes of body text pretending to be buttons
+                      was the most template-looking thing on the screen. */}
+                  <ul className="border-t border-border">
+                    {EXAMPLE_QUERIES.map(q => (
+                      <li key={q} className="border-b border-border">
                         <button
-                          onClick={() => toggleSources(i)}
-                          className="flex items-center gap-2 text-sm mb-3 transition-colors"
-                          style={{ color: "var(--muted-foreground)" }}
-                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#e8845a" }}
-                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "var(--muted-foreground)" }}
+                          onClick={() => handleSubmit(q)}
+                          className="group flex w-full items-baseline gap-3 py-3.5 text-left text-ui-lg text-muted-foreground transition-colors hover:text-foreground"
                         >
-                          <span className="text-xs">{showSources[i] ? "▾" : "▸"}</span>
-                          <span>{msg.chunks_used} chunks · {msg.sources.length} sources</span>
+                          <ArrowUp className="group-hover:text-brand-deep size-3.5 shrink-0 translate-y-px rotate-45 text-ink-subtle transition-colors" />
+                          <span>{q}</span>
                         </button>
-
-                        {showSources[i] && (
-                          <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--border)" }}>
-                            {msg.sources.map((s, si) => {
-                              const chunkKey = `${i}-${si}`
-                              const isExpanded = expandedChunk === chunkKey
-                              return (
-                                <div key={si} style={{ borderTop: si > 0 ? "1px solid var(--border)" : undefined }}>
-                                  <div
-                                    className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer transition-all"
-                                    style={{ background: isExpanded ? "rgba(204,107,69,0.06)" : si % 2 === 0 ? "var(--card)" : "transparent" }}
-                                    onClick={() => setExpandedChunk(isExpanded ? null : chunkKey)}
-                                  >
-                                    <span className="font-mono text-xs shrink-0 w-7 text-center px-1 py-0.5 rounded"
-                                      style={{ background: "rgba(204,107,69,0.15)", color: "#e8845a" }}>
-                                      [{si + 1}]
-                                    </span>
-                                    <span className="flex-1 truncate font-medium" style={{ color: "var(--foreground)" }}>
-                                      {s.title ?? "Unknown Source"}
-                                    </span>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                      {s.page_number != null && (
-                                        <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>p.{s.page_number}</span>
-                                      )}
-                                      <span className="text-xs font-mono px-2 py-0.5 rounded"
-                                        style={{ background: "var(--secondary)", color: "var(--muted-foreground)" }}>
-                                        {s.score.toFixed(3)}
-                                      </span>
-                                      <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>
-                                        {isExpanded ? "▴" : "▾"}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  {isExpanded && s.text && (
-                                    <div className="px-4 py-4"
-                                      style={{
-                                        background: "var(--muted)",
-                                        borderTop: "1px solid var(--border)",
-                                        color: "var(--sidebar-foreground)",
-                                        fontFamily: "var(--font-geist-mono), monospace",
-                                        fontSize: "13px",
-                                        whiteSpace: "pre-wrap",
-                                        wordBreak: "break-word",
-                                        lineHeight: 1.6,
-                                      }}>
-                                      {s.text}
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                exchanges.map((ex, i) => (
+                  <div
+                    key={i}
+                    onFocusCapture={() => setFocusedIndex(i)}
+                    // A rule between exchanges rather than a gap. On a page of
+                    // continuous prose the eye needs a line to know where one
+                    // answer stops and the next question starts; whitespace alone
+                    // reads as a paragraph break.
+                    className={cn(
+                      "animate-exchange-in",
+                      i > 0 && "mt-12 border-t border-border pt-12",
                     )}
+                  >
+                    <Exchange
+                      question={ex.question}
+                      answer={ex.answer?.content ?? ""}
+                      sources={ex.answer?.sources}
+                      chunksUsed={ex.answer?.chunks_used}
+                      pipeline={ex.answer?.pipeline}
+                      isStreaming={loading && i === lastIndex}
+                      waitSeconds={waitSeconds}
+                      openSource={railIndex === i ? openSource : null}
+                      onOpenSource={setOpenSource}
+                      onFocus={() => setFocusedIndex(i)}
+                    />
                   </div>
-                )}
-              </div>
-            ))}
+                ))
+              )}
 
-            {error && (
-              <div className="rounded-xl px-4 py-3.5 text-sm"
-                style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", color: "#f87171" }}>
-                {error}
-              </div>
-            )}
+              {error && <Notice className="mt-8">{error}</Notice>}
+              <div ref={bottomRef} className="h-px" />
+            </div>
+          </div>
 
-            <div ref={bottomRef} />
+          {rateLimitSeconds !== null && (
+            <div className="shrink-0 px-5 sm:px-8">
+              <Notice tone="warning" className="mx-auto w-full max-w-[46rem] xl:mx-0">
+                <span className="flex flex-wrap items-center gap-x-2">
+                  <span className="font-semibold">Two questions per 20 minutes</span>
+                  <span className="text-muted-foreground">You can ask again in</span>
+                  <span className="font-mono font-semibold">
+                    {Math.floor(rateLimitSeconds / 60)}:{String(rateLimitSeconds % 60).padStart(2, "0")}
+                  </span>
+                </span>
+              </Notice>
+            </div>
+          )}
+
+          <div className="shrink-0 px-5 pt-3 pb-5 sm:px-8">
+            <div className="mx-auto w-full max-w-[46rem] xl:mx-0">{composer}</div>
           </div>
         </div>
 
-        {/* Rate limit banner */}
-        {rateLimitSeconds !== null && (
-          <div className="shrink-0 mx-4 mt-3 px-4 py-3 rounded-xl flex items-center gap-3 text-sm"
-            style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
+        {/* The second column is evidence, not navigation. It is the only thing on
+            this screen worth a permanent band of the window, and it is what the
+            two sidebars were taking up room that could have gone to. */}
+        {/* Narrower than it was, and the group around it wider, which together
+            move its left edge a good way right. A source card holds a title, a
+            page and a score — it needed 336px only because it was set at reading
+            size; at interface size 288px is more than it needs, and the room that
+            frees goes to the margin between the answer and the evidence, which
+            is what was missing. */}
+        <aside
+          aria-label="Evidence for the answer"
+          className="bg-card hidden w-[18rem] shrink-0 overflow-y-auto border-l border-border px-5 py-9 xl:block"
+        >
+          {railExchange?.answer?.sources?.length ? (
+            <SourceList
+              sources={railExchange.answer.sources}
+              chunksUsed={railExchange.answer.chunks_used}
+              pipeline={railExchange.answer.pipeline}
+              openIndex={openSource}
+              onOpen={setOpenSource}
+            />
+          ) : (
             <div>
-              <span style={{ color: "#fbbf24", fontWeight: 600 }}>Rate limit reached</span>
-              <span style={{ color: "var(--muted-foreground)" }}> — Only 2 queries allowed per 20 minutes.</span>
+              <p className="label-meta">Evidence</p>
+              <p className="mt-2 text-ui text-muted-foreground">
+                The passages behind an answer appear here, numbered to match the
+                markers in its text.
+              </p>
             </div>
-            <div className="ml-auto shrink-0 font-mono font-bold text-base" style={{ color: "#fbbf24" }}>
-              {Math.floor(rateLimitSeconds / 60)}:{String(rateLimitSeconds % 60).padStart(2, "0")}
-            </div>
-          </div>
-        )}
-
-        {/* Input bar */}
-        <div className="shrink-0 px-4 py-4" style={{ borderTop: "1px solid var(--border)", background: "var(--sidebar)" }}>
-          <div className="max-w-3xl mx-auto">
-            <div className="flex gap-3 items-end px-4 py-3 rounded-2xl"
-              style={{ background: "var(--card)", border: "1px solid var(--border)", boxShadow: "0 4px 32px rgba(0,0,0,0.4)" }}
-            >
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={e => {
-                  setInput(e.target.value)
-                  e.target.style.height = "auto"
-                  e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px"
-                }}
-                onKeyDown={onKeyDown}
-                placeholder={rateLimitSeconds !== null ? "Rate limit active — please wait…" : "Ask a research question…"}
-                className="flex-1 bg-transparent resize-none outline-none leading-relaxed text-base"
-                style={{
-                  color: rateLimitSeconds !== null ? "var(--muted-foreground)" : "var(--foreground)",
-                  minHeight: "28px",
-                  maxHeight: "160px",
-                }}
-                rows={1}
-                disabled={loading || rateLimitSeconds !== null}
-              />
-              <button
-                onClick={() => handleSubmit()}
-                disabled={loading || !input.trim()}
-                className="shrink-0 w-9 h-9 rounded-xl flex items-center justify-center text-white transition-all duration-150 text-base font-medium"
-                style={loading || !input.trim() ? {
-                  background: "var(--secondary)", color: "var(--muted-foreground)", cursor: "not-allowed",
-                } : {
-                  background: "linear-gradient(135deg, #cc6b45 0%, #e8845a 100%)",
-                  boxShadow: "0 2px 12px rgba(204,107,69,0.45)",
-                }}
-              >
-                {loading ? (
-                  <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                ) : "↑"}
-              </button>
-            </div>
-            <p className="text-xs text-center mt-2 opacity-40" style={{ color: "var(--muted-foreground)" }}>
-              Enter to send · Shift+Enter for new line
-            </p>
-          </div>
-        </div>
+          )}
+        </aside>
       </div>
     </div>
   )
 }
 
+interface ExchangeItem {
+  question: string
+  answer: Message | null
+}
 
-
+/** Folds the alternating message list into question/answer pairs.
+ *
+ *  An assistant message with no question before it is kept with an empty question
+ *  rather than dropped: a conversation loaded from history could in principle
+ *  start with one, and losing an answer is worse than showing one without its
+ *  heading. */
+function pairMessages(messages: Message[]): ExchangeItem[] {
+  const out: ExchangeItem[] = []
+  for (const m of messages) {
+    if (m.role === "user") out.push({ question: m.content, answer: null })
+    else if (out.length > 0 && out[out.length - 1].answer === null) out[out.length - 1].answer = m
+    else out.push({ question: "", answer: m })
+  }
+  return out
+}
