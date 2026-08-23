@@ -1,24 +1,36 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useSyncExternalStore } from "react"
 import { Moon, Sun } from "lucide-react"
 
-import { applyTheme, resolveTheme, type Theme } from "@/lib/theme"
+import { applyTheme, type Theme } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
-export function ThemeToggle({ className }: { className?: string }) {
-  // Starts null rather than "light". The real theme lives in a class that a
-  // pre-paint script already put on <html>, and the server has no way to know
-  // what that was — so guessing here would render the wrong icon for a moment
-  // and trip a hydration mismatch.
-  const [theme, setTheme] = useState<Theme | null>(null)
+// The real theme lives in a class that a pre-paint script already put on <html>
+// — the DOM is the store. Reading it through useSyncExternalStore means no
+// hydration mismatch: the server renders the fallback (null → reserved space),
+// and React re-syncs to the client snapshot right after hydration.
+const listeners = new Set<() => void>()
+function subscribe(onChange: () => void) {
+  listeners.add(onChange)
+  return () => listeners.delete(onChange)
+}
+function getClientSnapshot(): Theme {
+  return document.documentElement.classList.contains("dark") ? "dark" : "light"
+}
+function getServerSnapshot(): Theme | null {
+  return null
+}
 
-  useEffect(() => setTheme(resolveTheme()), [])
+export function ThemeToggle({ className }: { className?: string }) {
+  const theme = useSyncExternalStore(subscribe, getClientSnapshot, getServerSnapshot)
 
   function toggle() {
     const next: Theme = theme === "dark" ? "light" : "dark"
     applyTheme(next)
-    setTheme(next)
+    // applyTheme writes the class directly; there is no external emitter, so
+    // the store's subscribers are notified here.
+    listeners.forEach(notify => notify())
   }
 
   const label = theme === "dark" ? "Switch to light mode" : "Switch to dark mode"

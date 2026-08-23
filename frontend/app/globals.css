@@ -7,114 +7,99 @@
 @custom-variant light (&:where(.light, .light *));
 
 /* ===========================================================================
-   Warm neutrals, one ink accent.
+   "Instrument panel" — the ResearchOS design language.
 
-   The palette survived a redesign that the layout did not, which is worth saying
-   plainly: the colours were never the problem. What went was everything built on
-   top of them — speech bubbles, an avatar beside every answer, generated
-   thumbnails, count badges, a green pill for each retrieval method, and a set of
-   animated borders and background textures. That set made a research tool look
-   like a messaging app, and it buried the one thing this product has that a
-   chatbot does not: the passage each claim came from.
+   Cool graphite surfaces, one electric indigo accent, Space Grotesk for
+   display type, Inter for interface copy and IBM Plex Mono for anything that
+   behaves like a readout (scores, page numbers, timers, kickers).
 
-   What the tokens carry now is a document. Cream is the page, near-white is
-   anything lifted off it, and a single deep navy does every accent job — dark
-   enough to set text in as well as fill a shape, which is what lets citation
-   markers, links and buttons all be one colour instead of needing a second.
+   The idea the whole system hangs on: this is a precision instrument for
+   reading evidence, so chrome is quiet, hairline and rectangular; expression
+   is spent in exactly three places — the accent colour, the display face and
+   the blueprint grid that textures marketing surfaces.
 
-   Two whole families went with the shapes that used them. The espresso rail is
-   gone with the icon column it was, and green went with the count badges it
-   existed for; --success remains, because a finished ingest still needs to say
-   so.
-
-   Both themes are solved the same way and neither is a flip of the other: every
-   ink is measured against the *worst* surface it can actually land on — which is
-   usually one of the tinted washes, not the page — and nothing dimmer than
-   4.5:1 ships. That is why the two lists below do not line up row for row.
-
-   The dark half is built in OKLCH rather than picked as hex; the reason is in
-   the comment on .dark, and it is the difference between a dark theme and a
-   brown one.
+   Both themes are measured the same way: every ink is checked against the
+   worst surface it lands on, nothing dimmer than 4.5:1 ships.
    =========================================================================== */
 
-/* Vellum (light, default): soft neutral desktop + deep teal primary. Dark below
-   is a full second pass, not a filter over these values. */
 :root, .light {
-  --canvas: #ecebed;            /* outer desktop gray */
-  --card: #ffffff;              /* main panels */
-  --list: #f5f5f7;              /* bubble bg, subtle surface */
+  --canvas: #f2f3f7;
+  --card: #ffffff;
+  --list: #f6f7fa;
   --popover: #ffffff;
-  --secondary: #f5f5f7;
-  --muted: #f0eff4;
-  --surface-raised: #f5f5f7;
-  --accent: #efeff5;
+  --secondary: #f6f7fa;
+  --muted: #eef0f5;
+  --surface-raised: #eff1f6;
+  --accent: #eef0f6;
 
-  --foreground: #1a1a1f;
-  --card-foreground: #1a1a1f;
-  --popover-foreground: #1a1a1f;
-  --secondary-foreground: #2a2a33;
-  --accent-foreground: #1a1a1f;
-  --muted-foreground: #6b6b7a;
-  --ink-subtle: #8a8a99;
+  --background: var(--card);
+  --foreground: #13141a;
+  --card-foreground: #13141a;
+  --popover-foreground: #13141a;
+  --secondary-foreground: #2c2f3a;
+  --accent-foreground: #13141a;
+  --muted-foreground: #5b6070;
+  --ink-subtle: #878da0;
 
-  --primary: #0f766e;           /* deep teal */
+  --primary: #4f46e5;
   --primary-foreground: #ffffff;
-  --brand-deep: #0f766e;
-  --brand-soft: rgba(15, 118, 110, 0.08);
-  --brand-edge: rgba(15, 118, 110, 0.18);
+  --brand-deep: #4338ca;
+  --brand-soft: rgba(79, 70, 229, 0.08);
+  --brand-edge: rgba(79, 70, 229, 0.22);
 
-  --destructive: #e5484d;
+  --destructive: #dc2626;
   --destructive-foreground: #ffffff;
-  --success: #30a46c;
-  --warning: #e4a100;
+  --success: #15803d;
+  --warning: #b45309;
 
-  --border: #ecebf0;
-  --border-strong: #dddce6;
-  --input: #ecebf0;
-  --ring: rgba(15, 118, 110, 0.35);
+  --border: #e4e6ee;
+  --border-strong: #d2d5e2;
+  --input: #dcdfeb;
+  --ring: rgba(79, 70, 229, 0.40);
 
-  --elevation-column: 0 1px 3px rgba(0,0,0,0.06), 0 8px 24px -12px rgba(0,0,0,0.08);
-  --elevation-lift: 0 1px 2px rgba(0,0,0,0.06), 0 4px 12px -4px rgba(0,0,0,0.08);
+  --elevation-panel: 0 1px 2px rgba(19, 20, 30, 0.05), 0 12px 32px -16px rgba(19, 20, 30, 0.14);
+  --elevation-lift: 0 1px 2px rgba(19, 20, 30, 0.06), 0 6px 16px -8px rgba(19, 20, 30, 0.12);
 
-  --radius: 0.875rem;
+  --radius: 0.75rem;
 }
 
 .dark {
-  --canvas: #0e0e10;            /* desktop */
-  --list: #1a1a1f;
-  --card: #1e1e22;              /* panels, bubbles */
-  --popover: #24242a;
-  --secondary: #1a1a1f;
-  --muted: #17171b;
-  --surface-raised: #25252c;
-  --accent: #24242a;
+  --canvas: #0b0c11;
+  --list: #171a21;
+  --card: #12141b;
+  --popover: #1a1d26;
+  --secondary: #171a21;
+  --muted: #14161d;
+  --surface-raised: #1e222c;
+  --accent: #1a1d26;
 
-  --foreground: #f5f5f7;
-  --card-foreground: #f5f5f7;
-  --popover-foreground: #f5f5f7;
-  --secondary-foreground: #d4d4dc;
-  --accent-foreground: #f5f5f7;
-  --muted-foreground: #9a9aac;
-  --ink-subtle: #8a8a9c;
+  --background: var(--card);
+  --foreground: #ecedf3;
+  --card-foreground: #ecedf3;
+  --popover-foreground: #ecedf3;
+  --secondary-foreground: #c6cad8;
+  --accent-foreground: #ecedf3;
+  --muted-foreground: #9aa1b4;
+  --ink-subtle: #767d92;
 
-  --primary: #2dd4bf;           /* lifted teal for dark */
-  --primary-foreground: #0e0e10;
-  --brand-deep: #5eead4;
-  --brand-soft: rgba(45, 212, 191, 0.14);
-  --brand-edge: rgba(45, 212, 191, 0.28);
+  --primary: #818cf8;
+  --primary-foreground: #0b0c11;
+  --brand-deep: #a5b4fc;
+  --brand-soft: rgba(129, 140, 248, 0.13);
+  --brand-edge: rgba(129, 140, 248, 0.32);
 
-  --destructive: #ff6369;
-  --destructive-foreground: #1a1a1f;
-  --success: #4cc38a;
-  --warning: #ffbf47;
+  --destructive: #f87171;
+  --destructive-foreground: #0b0c11;
+  --success: #4ade80;
+  --warning: #fbbf24;
 
-  --border: #2a2a30;
-  --border-strong: #383840;
-  --input: #2a2a30;
-  --ring: rgba(45, 212, 191, 0.45);
+  --border: #232732;
+  --border-strong: #333848;
+  --input: #2a2f3c;
+  --ring: rgba(129, 140, 248, 0.50);
 
-  --elevation-column: 0 1px 3px rgba(0,0,0,0.4), 0 16px 40px -20px rgba(0,0,0,0.6);
-  --elevation-lift: 0 1px 2px rgba(0,0,0,0.4), 0 8px 24px -12px rgba(0,0,0,0.5);
+  --elevation-panel: 0 1px 2px rgba(0, 0, 0, 0.45), 0 20px 48px -24px rgba(0, 0, 0, 0.65);
+  --elevation-lift: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px -14px rgba(0, 0, 0, 0.55);
 }
 
 @theme inline {
@@ -148,47 +133,44 @@
   --color-ring: var(--ring);
   --color-ink-subtle: var(--ink-subtle);
 
-  /* Read versus operate. The serif carries answers and the questions that head
-     them; the grotesque carries every control around them; the mono carries any
-     number that changes in place. The variable names differ from the theme keys
-     on purpose — a key pointing at a custom property of its own name is a
-     circular reference that silently resolves to nothing. */
-  --font-serif: var(--font-source-serif), ui-serif, Georgia, serif;
-  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-dm-mono), ui-monospace, monospace;
+  /* Variable names differ from theme keys on purpose: a key pointing at a
+     custom property of its own name is a circular reference that silently
+     resolves to nothing. */
+  --font-display: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
 
   --text-meta: 0.6875rem;
   --text-meta--line-height: 1.4;
   --text-data: 0.8125rem;
   --text-data--line-height: 1.5;
   --text-ui: 0.875rem;
-  --text-ui--line-height: 1.5;
+  --text-ui--line-height: 1.55;
   --text-ui-lg: 0.9375rem;
-  --text-ui-lg--line-height: 1.5;
-  /* Answer prose. 17px rather than 16: the serif has a smaller x-height than
-     the grotesque around it, so matching their point sizes would not match their
-     apparent sizes. .prose-answer loosens the leading further, because a screen
-     of continuous reading needs more air than a paragraph of interface copy. */
+  --text-ui-lg--line-height: 1.55;
+  /* Answer prose. 17px rather than 16: Inter's x-height at 17 matches the
+     apparent size of UI text at 15 next to it. */
   --text-read: 1.0625rem;
-  --text-read--line-height: 1.65;
-  --text-title-sm: 1.125rem;        /* the wordmark */
-  --text-title-sm--line-height: 1.35;
+  --text-read--line-height: 1.7;
+  --text-title-sm: 1.125rem;
+  --text-title-sm--line-height: 1.3;
   --text-title: 1.375rem;
-  --text-title--line-height: 1.3;
-  --text-title-lg: 1.75rem;         /* a question, set as the heading of its answer */
-  --text-title-lg--line-height: 1.2;
-  --text-display: 2.25rem;          /* the opening screen, and the ingest page */
-  --text-display--line-height: 1.1;
+  --text-title--line-height: 1.25;
+  --text-title-lg: 1.625rem;
+  --text-title-lg--line-height: 1.25;
+  --text-display: 2.5rem;
+  --text-display--line-height: 1.08;
+  --text-display-lg: clamp(2.75rem, 6vw, 4.25rem);
+  --text-display-lg--line-height: 1.04;
 
-  /* Named --elevation-* in :root so these theme keys are not circular. */
-  --shadow-column: var(--elevation-column);
+  --shadow-panel: var(--elevation-panel);
   --shadow-lift: var(--elevation-lift);
 
-  --radius-sm: calc(var(--radius) * 0.4);
-  --radius-md: calc(var(--radius) * 0.64);
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.9);
+  --radius-xl: calc(var(--radius) * 1.35);
+  --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.4);
   --radius-4xl: calc(var(--radius) * 3);
 }
@@ -207,9 +189,6 @@
     background: var(--canvas);
     color: var(--foreground);
     font-family: var(--font-sans);
-    /* No negative tracking here any more. The -0.01em was compensating for a
-       geometric sans set loose by default; a grotesque is already spaced for
-       interface sizes, and tightening it only closes the counters. */
   }
 
   /* Counts, scores and timers must not shift as they change. */
@@ -218,13 +197,10 @@
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--primary) 22%, transparent);
+    background: color-mix(in oklab, var(--primary) 24%, transparent);
     color: var(--foreground);
   }
 
-
-  /* No border-radius here: an outline already follows the element's own corners,
-     and setting one reshapes the element while it holds focus. */
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
@@ -233,70 +209,67 @@
 
 @layer components {
 
-  /* --- the columns ------------------------------------------------------- */
-
-  /* The last floating panel in the app. Every other surface is now a region of
-     one page separated by a hairline, which is what a tool looks like; the sign-in
-     card is genuinely a single object on an empty field, so it still floats. */
-  .column {
-    @apply rounded-2xl border border-border;
-    box-shadow: var(--elevation-column);
-  }
-
   /* --- type roles ------------------------------------------------------- */
 
-  /* Set in the text face, not the interface one. A heading cut from the same
-     face as the prose under it belongs to that prose; cut from the chrome face,
-     it belongs to the toolbar. */
+  /* Display face: headlines, wordmarks, question headings. Space Grotesk is
+     tight by design; a hair of negative tracking keeps it from colliding at
+     large sizes without closing up small ones. */
   .font-display {
-    font-family: var(--font-serif);
+    font-family: var(--font-display);
     font-weight: 600;
-    letter-spacing: -0.014em;
+    letter-spacing: -0.02em;
   }
 
-  /* Small, uppercase, widely tracked. Caps set at their default spacing look
-     cramped at this size, which is why every small-caps label in print is
-     letterspaced. */
+  /* Small uppercase readout labels, set in the mono face. */
   .label-meta {
-    @apply text-meta font-semibold uppercase text-ink-subtle;
-    font-family: var(--font-sans);
-    letter-spacing: 0.11em;
+    @apply text-meta font-medium uppercase text-ink-subtle;
+    font-family: var(--font-mono);
+    letter-spacing: 0.14em;
   }
 
-  /* --- list rows -------------------------------------------------------- */
+  /* --- surfaces --------------------------------------------------------- */
+
+  /* Blueprint grid: the one decorative texture in the system, reserved for
+     marketing surfaces. Two hairlines per axis over the page colour. */
+  .grid-paper {
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 35%, transparent 78%);
+  }
+
+  .panel {
+    @apply rounded-xl border border-border bg-card;
+  }
 
   /* --- controls --------------------------------------------------------- */
 
   .field {
-    @apply w-full rounded-lg border border-input bg-card px-4 py-3 text-ui-lg text-foreground
+    @apply w-full rounded-lg border border-input bg-card px-3.5 py-2.5 text-ui-lg text-foreground
            transition-colors duration-150 outline-none
            placeholder:text-ink-subtle
            hover:border-border-strong
-           focus:border-brand-edge
+           focus:border-primary
            disabled:cursor-not-allowed disabled:opacity-55;
   }
 
-  /* The primary action. 9.00:1. */
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5
            text-ui-lg font-semibold text-primary-foreground
-           transition-colors duration-150
+           transition-[background-color,box-shadow,transform] duration-150
            active:translate-y-px
            disabled:pointer-events-none disabled:bg-surface-raised disabled:text-ink-subtle;
   }
-  /* A mixed colour rather than a brightness filter. brightness() multiplies
-     every channel, so the same hover looks like a different amount of change in
-     each theme — and on the dark theme's light accent it washed out instead of
-     deepening. */
   .btn-primary:not(:disabled):hover {
-    background: color-mix(in oklab, var(--primary) 88%, var(--foreground));
+    background: color-mix(in oklab, var(--primary) 86%, var(--foreground));
+    box-shadow: 0 4px 14px -4px color-mix(in oklab, var(--primary) 55%, transparent);
   }
 
-  /* A secondary action that takes no accent area. */
   .btn-soft {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-list
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-card
            px-4 py-2.5 text-ui-lg font-semibold text-foreground transition-colors
-           hover:border-border-strong hover:bg-card;
+           hover:border-border-strong hover:bg-list;
   }
 
   .btn-quiet {
@@ -310,51 +283,26 @@
            underline-offset-2 transition-colors hover:decoration-current;
   }
 
-  /* --- the exchange ------------------------------------------------------
-     No bubbles and no avatar. This was a chat transcript and it should not have
-     been: what a person does here is ask a question and then read a cited
-     document about it, and a bubble is a container for a remark. The bubbles
-     also fought the content — a markdown table inside a rounded speech shape
-     with 85% max-width has nowhere to go.
+  /* --- the exchange ------------------------------------------------------ */
 
-     What replaces them is the shape of a reference answer: the question set as a
-     heading, the evidence named directly under it, then the prose. */
-
-  /* The question. Large enough to open a section, and it wraps at the reading
-     measure rather than the panel width so a long question does not run to four
-     hundred pixels wider than the answer below it. */
   .q-heading {
     @apply text-title-lg text-foreground;
-    /* The face and tracking are repeated rather than @apply-ing .font-display:
-       @apply only reaches utilities, and .font-display is a component class in
-       this same layer. */
-    font-family: var(--font-serif);
+    font-family: var(--font-display);
     font-weight: 600;
-    letter-spacing: -0.014em;
+    letter-spacing: -0.02em;
     text-wrap: balance;
   }
 
-  /* One retrieved passage, numbered to match the marker in the prose. Fixed
-     width so a row of them is a row and not a ragged set of boxes sized by
-     however long each paper's title happens to be. */
-  .source-card {
-    @apply flex w-56 shrink-0 flex-col gap-1 rounded-lg border border-border bg-list px-3 py-2.5
-           text-left transition-colors hover:border-border-strong;
-  }
-  .source-card[aria-expanded="true"] {
-    @apply border-brand-edge;
-    background: var(--brand-soft);
-  }
-
-  /* The numeral on a source card, and the same shape used inline in the prose. */
+  /* One retrieved passage, numbered to match its inline marker. */
   .source-index {
-    @apply grid size-[18px] shrink-0 place-items-center rounded-[5px] bg-brand-soft
+    @apply grid size-[18px] shrink-0 place-items-center rounded-md bg-brand-soft
            font-mono text-[10px] font-semibold text-brand-deep;
   }
 
-  /* An inline citation. Baseline-shifted rather than a real <sup>, because <sup>
-     inside a paragraph at 1.75 line-height leaves the marker floating halfway to
-     the line above. */
+  /* An inline citation, baseline-shifted rather than a real <sup>: <sup> inside
+     a 1.7 line-height paragraph leaves the marker floating halfway to the line
+     above. Brackets are restored off-screen so copying a passage pastes "[3] "
+     instead of gluing digits to words. */
   .cite-mark {
     @apply relative mx-px inline-grid size-[17px] translate-y-[-1px] place-items-center rounded-[4px]
            bg-brand-soft align-baseline font-mono text-[10px] font-semibold text-brand-deep
@@ -363,14 +311,6 @@
   .cite-mark:hover {
     @apply bg-primary text-primary-foreground;
   }
-
-  /* Answers get quoted out of this app constantly — into notes, into a paper.
-     Copying a passage should not paste bare digits jammed against words, so the
-     brackets are restored to the clipboard.
-
-     Absolute, and the marker above is relative, for a reason beyond hiding them:
-     .cite-mark is an inline-grid, and an in-flow pseudo-element would become a
-     third grid item and knock the number off centre. */
   .cite-mark::before { content: " ["; }
   .cite-mark::after { content: "] "; }
   .cite-mark::before,
@@ -382,17 +322,15 @@
     clip-path: inset(50%);
   }
 
-  /* The passage itself, opened under the row rather than inside a card, so a long
-     quote never reflows the row it was opened from. */
   .passage {
-    @apply rounded-lg border border-border bg-list px-4 py-3 font-mono text-data
+    @apply rounded-lg border border-border bg-list px-3.5 py-3 font-mono text-data
            whitespace-pre-wrap text-muted-foreground;
   }
 }
 
 /* ---------------------------------------------------------------------------
-   Answers render through react-markdown, so the prose plugin's palette is wired
-   to our tokens.
+   Answers render through react-markdown; the prose plugin's palette is wired
+   to our tokens here.
    --------------------------------------------------------------------------- */
 .prose-answer {
   --tw-prose-body: var(--foreground);
@@ -408,32 +346,22 @@
   --tw-prose-captions: var(--ink-subtle);
   --tw-prose-code: var(--foreground);
   --tw-prose-pre-code: var(--foreground);
-  --tw-prose-pre-bg: var(--card);
+  --tw-prose-pre-bg: var(--list);
   --tw-prose-th-borders: var(--border-strong);
   --tw-prose-td-borders: var(--border);
-}
 
-/* Reading settings, not decoration. 1.75 is loose for interface text and correct
-   for a screen of continuous prose — these answers run to several paragraphs
-   with tables in them, which is reading, not scanning. */
-.prose-answer {
-  font-family: var(--font-serif);
   font-size: var(--text-read);
   line-height: 1.72;
-  /* Old-style figures would be prettier and are wrong here: these paragraphs are
-     full of years, percentages and scores that have to line up with the same
-     numbers in the evidence rail beside them. */
   font-variant-numeric: lining-nums tabular-nums;
 }
 
 .prose-answer :where(h1, h2, h3) {
-  font-weight: 700;
-  letter-spacing: -0.022em;
+  font-weight: 650;
+  letter-spacing: -0.02em;
 }
 
-/* Answers arrive with real tables in them. Inside the reading measure a table
-   has nowhere to go, so it gets its own scroller rather than forcing the whole
-   column wider or being clipped. */
+/* A table inside a reading measure has nowhere to go: give it its own scroller
+   instead of forcing the column wider or clipping it. */
 .prose-answer :where(table) {
   display: block;
   overflow-x: auto;
@@ -446,7 +374,7 @@
 }
 
 .prose-answer :where(code):not(:where(pre code)) {
-  background: var(--card);
+  background: var(--list);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.1em 0.34em;
@@ -458,42 +386,38 @@
 .prose-answer :where(pre) { border: 1px solid var(--border); }
 
 /* ---------------------------------------------------------------------------
-   Motion. Message arrival, the wait, and state feedback. Nothing decorative.
+   Motion. Message arrival, the wait, state feedback. Nothing decorative except
+   where marked.
    --------------------------------------------------------------------------- */
 
-/* An exchange lands from slightly below, once. No scale: the previous version
-   grew the block into place, and on a screen of text that reads as the page
-   settling rather than as content arriving. */
-@keyframes exchange-in {
-  from { opacity: 0; transform: translateY(8px); }
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: none; }
 }
-.animate-exchange-in { animation: exchange-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-rise-in { animation: rise-in 340ms cubic-bezier(0.16, 1, 0.3, 1) both; }
 
-/* The wait before the first token. A segment travelling a hairline track, not
-   three bouncing dots: dots are the convention for a person typing, and nothing
-   here is typing — the question is being run against every paper. An
-   indeterminate bar is what a system doing work looks like. */
-@keyframes working-sweep {
+/* The wait before the first token: an indeterminate bar, because nothing here
+   is "typing" — the question is being run against every paper. */
+@keyframes sweep {
   0%   { left: -35%; width: 35%; }
   55%  { left: 45%;  width: 45%; }
   100% { left: 100%; width: 25%; }
 }
-.working-bar {
+.sweep-bar {
   position: relative;
   height: 2px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--border);
 }
-.working-bar::after {
+.sweep-bar::after {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
   background: var(--primary);
   border-radius: inherit;
-  animation: working-sweep 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  animation: sweep 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
 }
 
 /* Tells a finished answer apart from one still arriving. */
@@ -513,18 +437,7 @@
   animation: caret-pulse 1.15s steps(1, end) infinite;
 }
 
-/* Suggestion chips arriving. Overshoots past 1 and settles. */
-@keyframes emoji-pop {
-  0%   { opacity: 0; transform: scale(0.3) translateY(6px); }
-  62%  { opacity: 1; transform: scale(1.16) translateY(0); }
-  100% { opacity: 1; transform: scale(1) translateY(0); }
-}
-.animate-emoji-pop { animation: emoji-pop 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
-
-/* Landing page only: a section settles in as it crosses into view, once,
-   rather than all firing at page load — the load itself is the hero's job.
-   Starts a hair below and slightly scaled, same easing family as the rest of
-   the app's motion so it reads as one system, not a marketing-site bolt-on. */
+/* Landing sections settle in once as they cross into view. */
 .reveal {
   opacity: 0;
   transform: translateY(18px);
@@ -533,29 +446,30 @@
 }
 .reveal.is-visible { opacity: 1; transform: none; }
 
-/* A slow ambient breathing on the hero's corner glow — the one place in the
-   redesign that is allowed to move without a reason tied to state, because it
-   is background atmosphere, not information. */
-@keyframes ambient-drift {
-  0%, 100% { opacity: 0.55; transform: scale(1); }
-  50%      { opacity: 0.85; transform: scale(1.08); }
+/* The how-it-works connector: draws left-to-right instead of rising. Only the
+   transform is animated, and opacity stays at 1 throughout. */
+.line-draw {
+  opacity: 1;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 900ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition-delay: var(--reveal-delay, 0ms);
 }
-.animate-ambient-drift { animation: ambient-drift 7s ease-in-out infinite; }
+.line-draw.is-visible { transform: scaleX(1); }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-exchange-in,
-  .animate-emoji-pop,
+  .animate-rise-in,
   .stream-caret::after { animation: none; }
-  /* The bar carries no information on its own — the seconds counter beside it
-     does — so with motion off it becomes a static rule rather than a full track
-     that would read as "complete". */
-  .working-bar::after { animation: none; width: 30%; }
+  .sweep-bar::after { animation: none; width: 30%; }
   .reveal {
     opacity: 1;
     transform: none;
     transition: none;
   }
-  .animate-ambient-drift { animation: none; }
+  .line-draw {
+    transform: none;
+    transition: none;
+  }
 }
 
 /* Only while the theme toggle is mid-swap; left on it would lag every hover. */
@@ -568,8 +482,6 @@
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
   border-radius: 999px;
-  /* Transparent border shrinks the visible thumb without shrinking the hit
-     area, so it stays grabbable while looking like a hairline. */
   border: 4px solid transparent;
   background-clip: content-box;
 }

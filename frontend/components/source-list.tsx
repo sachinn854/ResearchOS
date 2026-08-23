@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils"
  * text.
  *
  * The open card is controlled from outside rather than held here, because two
- * different things open one: clicking the card, and clicking the `[3]` in the
+ * different things open one: clicking the row, and clicking the `[3]` in the
  * middle of a sentence three hundred pixels away. Owning that state here would
  * mean the prose could not reach it.
  */
@@ -36,11 +36,12 @@ export function SourceList({
 
   return (
     <div className={className}>
-      <p className="label-meta">Evidence</p>
-      <p className="mt-1 text-ui text-muted-foreground">
-        {chunksUsed ?? sources.length} passages
-        {retrieval && <span className="text-ink-subtle"> · {retrieval}</span>}
-      </p>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="label-meta">Evidence</p>
+        <p className="font-mono text-meta text-ink-subtle">
+          {chunksUsed ?? sources.length} passages{retrieval && ` · ${retrieval}`}
+        </p>
+      </div>
 
       <ul className="mt-3 space-y-1.5">
         {sources.map((s, i) => {
@@ -57,12 +58,12 @@ export function SourceList({
                   "flex w-full gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
                   isOpen
                     ? "border-brand-edge bg-brand-soft"
-                    : "hover:bg-surface-raised border-transparent",
+                    : "border-border bg-card hover:border-border-strong",
                 )}
               >
                 <span className="source-index mt-px">{n}</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-ui font-semibold text-foreground">
+                  <span className="block truncate text-ui font-semibold text-foreground">
                     {s.title ?? "Unknown source"}
                   </span>
                   <span className="mt-0.5 block font-mono text-meta text-ink-subtle">
@@ -72,7 +73,7 @@ export function SourceList({
                 </span>
               </button>
 
-              {/* The quote opens under its own card rather than in a shared slot
+              {/* The quote opens under its own row rather than in a shared slot
                   at the bottom, so the thing you clicked does not move. */}
               {isOpen && s.text && <p className="passage mt-1.5">{s.text}</p>}
             </li>

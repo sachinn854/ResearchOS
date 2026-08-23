@@ -25,6 +25,7 @@ const CITATION = /\[(\d{1,2})\]/g
  * own passages is open.
  */
 export function Exchange({
+  index,
   question,
   answer,
   sources,
@@ -33,6 +34,8 @@ export function Exchange({
   isStreaming,
   waitSeconds,
 }: {
+  /** 1-based position in the conversation; rendered as the Q-number readout. */
+  index: number
   question: string
   answer: string
   sources?: SourceItem[]
@@ -49,13 +52,23 @@ export function Exchange({
   // each token and force it to remount the whole answer.
   const components = useMemo(
     () => markdownComponents(cited.length, n => setOpenIndex(cur => (cur === n ? null : n))),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [cited.length],
   )
 
   return (
     <article>
-      <h2 className="q-heading">{question}</h2>
+      {/* Your question sits in a tinted card so a scan of the page separates
+          what you asked from what the model wrote — both would otherwise read
+          as one continuous document in the same face and colour. */}
+      <div className="rounded-xl border border-brand-edge bg-brand-soft px-5 py-4">
+        <p className="label-meta flex items-center gap-2">
+          <span className="size-1.5 rounded-full bg-primary" />
+          You · Q{String(index).padStart(2, "0")}
+        </p>
+        <p className="font-display mt-2 text-title-sm font-semibold leading-snug tracking-[-0.02em] text-foreground">
+          {question}
+        </p>
+      </div>
 
       {answer ? (
         <div
@@ -66,7 +79,7 @@ export function Exchange({
           aria-atomic="false"
           aria-busy={isStreaming}
           className={cn(
-            "prose-answer prose mt-5 max-w-none",
+            "prose-answer prose mt-6 max-w-none",
             "prose-a:font-semibold prose-a:no-underline hover:prose-a:underline",
             "prose-pre:rounded-lg prose-pre:text-data",
             "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
@@ -78,8 +91,12 @@ export function Exchange({
           </ReactMarkdown>
         </div>
       ) : (
-        <div className="mt-5 max-w-md" role="status">
-          <div className="working-bar" />
+        <div className="mt-6 max-w-md" role="status">
+          <p className="label-meta flex items-center gap-2">
+            <span className="size-1.5 rounded-full bg-success" />
+            ResearchOS
+          </p>
+          <div className="sweep-bar mt-3" />
           <p className="mt-3 text-ui text-muted-foreground">
             Searching your papers
             {waitSeconds > 2 && (

@@ -223,7 +223,10 @@ def stream_generator_node(state: AgentState) -> Generator[str, None, None]:
         model=settings.llm_model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
-        max_tokens=4096,
+        # 4096 cut long report answers off mid-sentence (finish_reason="length").
+        # The model supports 64k output; tokens are billed only as used, so the
+        # cap is headroom, not a budget.
+        max_tokens=16384,
         stream=True,
     )
 
