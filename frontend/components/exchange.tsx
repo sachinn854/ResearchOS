@@ -1,6 +1,6 @@
 "use client"
 
-import { Children, useMemo, type ReactNode } from "react"
+import { Children, useMemo, useState, type ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -20,9 +20,9 @@ const CITATION = /\[(\d{1,2})\]/g
  * read a cited piece of writing about it, and a bubble is a container for a
  * remark.
  *
- * The evidence lives in the rail beside this on a wide screen, and folds in
- * underneath when there is no room for a rail. Both render the same component
- * off the same state, so the narrow layout cannot drift from the wide one.
+ * The evidence sits inline right under the answer, on every width — there is
+ * no separate rail to keep in sync, so each exchange just owns which of its
+ * own passages is open.
  */
 export function Exchange({
   question,
@@ -32,9 +32,6 @@ export function Exchange({
   pipeline,
   isStreaming,
   waitSeconds,
-  openSource,
-  onOpenSource,
-  onFocus,
 }: {
   question: string
   answer: string
@@ -43,21 +40,15 @@ export function Exchange({
   pipeline?: PipelineInfo
   isStreaming: boolean
   waitSeconds: number
-  /** 1-based index of the open passage, or null. Owned by the page so the rail
-   *  and the inline list stay in step. */
-  openSource: number | null
-  onOpenSource: (n: number | null) => void
-  /** Called when something in this exchange is used, so the rail can switch to
-   *  showing this answer's evidence rather than the newest one's. */
-  onFocus: () => void
 }) {
   const cited = sources ?? []
+  const [openIndex, setOpenIndex] = useState<number | null>(null)
 
   // Rebuilt only when the number of sources changes, not on every streamed
   // token: a new object here would hand react-markdown a new component map on
   // each token and force it to remount the whole answer.
   const components = useMemo(
-    () => markdownComponents(cited.length, n => { onFocus(); onOpenSource(n) }),
+    () => markdownComponents(cited.length, n => setOpenIndex(cur => (cur === n ? null : n))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [cited.length],
   )
@@ -105,14 +96,13 @@ export function Exchange({
         </div>
       )}
 
-      {/* Below xl there is no rail, so the evidence folds in here instead. */}
       <SourceList
         sources={cited}
         chunksUsed={chunksUsed}
         pipeline={pipeline}
-        openIndex={openSource}
-        onOpen={n => { onFocus(); onOpenSource(n) }}
-        className="mt-8 border-t border-border pt-5 xl:hidden"
+        openIndex={openIndex}
+        onOpen={setOpenIndex}
+        className="mt-8 border-t border-border pt-5"
       />
     </article>
   )

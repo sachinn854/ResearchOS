@@ -143,168 +143,203 @@ export default function IngestPage() {
   if (authLoading || !user) return <div className="bg-canvas h-dvh" />
 
   return (
-    <div className="bg-canvas flex min-h-dvh flex-col">
+    <div className="flex min-h-dvh flex-col bg-canvas">
       <TopBar active="ingest" />
 
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-xl px-5 py-10 sm:px-8 sm:py-14">
+        <div className="mx-auto max-w-[880px] px-5 py-8 sm:px-6 sm:py-10">
+          <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
+            <div>
+              <header className="mb-6">
+                <p className="label-meta">Library</p>
+                <h1 className="mt-2 font-serif text-[30px] font-semibold leading-none tracking-[-0.03em] text-foreground sm:text-[34px]">
+                  Add a document
+                </h1>
+                <p className="mt-3 max-w-[52ch] text-[15px] leading-6 text-muted-foreground">
+                  Upload a file or paste a link. When it finishes, you can ask questions against it and the
+                  answers will cite its pages.
+                </p>
+              </header>
 
-          <header className="mb-8">
-            <h1 className="font-display text-display text-foreground">Add a document</h1>
-            <p className="mt-3 text-read text-muted-foreground">
-              Upload a file or paste a link. When it finishes, you can ask questions
-              against it and the answers will cite its pages.
-            </p>
-          </header>
+              <div className="space-y-6 rounded-[20px] border border-border bg-card p-5 shadow-lift sm:p-6">
+                <div className="flex gap-1 rounded-full border border-border bg-list p-1">
+                  {(["file", "url"] as const).map(t => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => switchTab(t)}
+                      aria-pressed={tab === t}
+                      className={cn(
+                        "flex-1 rounded-full py-2.5 text-[14px] font-semibold transition-colors",
+                        tab === t
+                          ? "bg-card text-foreground shadow-lift"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {t === "file" ? "Upload a file" : "Paste a link"}
+                    </button>
+                  ))}
+                </div>
 
-          <div className="space-y-6">
-            {/* Segmented control. The track sits on the list grey, which is darker
-                than the card in both themes, so the selected tab can rise to the
-                card's own level. */}
-            <div className="bg-list flex gap-1 rounded-xl border border-border p-1">
-              {(["file", "url"] as const).map(t => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => switchTab(t)}
-                  aria-pressed={tab === t}
-                  className={cn(
-                    "flex-1 rounded-lg py-2.5 text-ui-lg transition-colors",
-                    tab === t
-                      ? "bg-card font-bold text-foreground shadow-lift"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {t === "file" ? "Upload a file" : "Paste a link"}
-                </button>
-              ))}
-            </div>
+                {tab === "file" && (
+                  <div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".pdf,.txt,.md,.docx"
+                      className="hidden"
+                      onChange={handleFileChange}
+                      tabIndex={-1}
+                    />
+                    <button
+                      type="button"
+                      onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+                      onDragLeave={() => setDragOver(false)}
+                      onDrop={handleDrop}
+                      onClick={() => fileInputRef.current?.click()}
+                      aria-label={
+                        selectedFile
+                          ? `${selectedFile.name} selected. Choose a different file`
+                          : `Choose a file. PDF, DOCX, TXT or MD, up to ${MAX_FILE_MB} megabytes`
+                      }
+                      className={cn(
+                        "w-full rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors sm:py-12",
+                        dragOver || selectedFile
+                          ? "border-brand-edge bg-brand-soft"
+                          : "border-border-strong bg-card hover:border-brand-edge hover:bg-list",
+                      )}
+                    >
+                      {selectedFile ? (
+                        <>
+                          <FileText className="mx-auto size-8 text-brand-deep" />
+                          <p className="mt-3 text-[14px] font-bold text-foreground">{selectedFile.name}</p>
+                          <p className="mt-1 font-mono text-[11px] tracking-[0.04em] text-ink-subtle">
+                            {(selectedFile.size / 1024).toFixed(0)} KB · tap to change
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="mx-auto size-8 text-ink-subtle" />
+                          <p className="mt-3 text-[15px] font-bold text-foreground">Drop a file here</p>
+                          <p className="mt-1 text-[13px] text-muted-foreground">
+                            or tap to browse · PDF, DOCX, TXT, MD · up to {MAX_FILE_MB}MB
+                          </p>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
 
-            {tab === "file" && (
-              <div>
-                {/* Sibling of the button, not a child: a <button> may not contain
-                    another interactive element. */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.txt,.md,.docx"
-                  className="hidden"
-                  onChange={handleFileChange}
-                  tabIndex={-1}
+                {tab === "url" && (
+                  <TextField
+                    label="Link to the document"
+                    value={urlSource}
+                    onChange={e => setUrlSource(e.target.value)}
+                    placeholder="https://arxiv.org/pdf/2005.11401"
+                    disabled={loading}
+                  />
+                )}
+
+                <TextField
+                  label="What should it be called?"
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  placeholder="Attention Is All You Need"
+                  disabled={loading}
+                  hint="This is the name you will see beside every citation from it."
                 />
-                {/* A real <button>, not a div with an onClick: that version could
-                    only be reached with a mouse — no Tab stop, no Enter or Space,
-                    and nothing for a screen reader to announce. */}
+
+                <div className="space-y-2">
+                  <label htmlFor="ingest-domain" className="block text-[14px] font-bold text-foreground">
+                    Domain
+                  </label>
+                  <DomainSelect
+                    id="ingest-domain"
+                    value={domain}
+                    onChange={setDomain}
+                    disabled={loading}
+                    className="h-12 w-full rounded-full border-border bg-list px-4"
+                  />
+                </div>
+
                 <button
                   type="button"
-                  onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  aria-label={
-                    selectedFile
-                      ? `${selectedFile.name} selected. Choose a different file`
-                      : `Choose a file. PDF, DOCX, TXT or MD, up to ${MAX_FILE_MB} megabytes`
-                  }
-                  className={cn(
-                    "w-full rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors",
-                    dragOver || selectedFile
-                      ? "border-brand-edge bg-brand-soft"
-                      : "hover:border-brand-edge hover:bg-list border-border-strong",
-                  )}
+                  onClick={handleSubmit}
+                  disabled={loading || !canSubmit}
+                  className="btn-primary w-full rounded-full py-3"
                 >
-                  {selectedFile ? (
+                  {loading ? (
                     <>
-                      <FileText className="text-brand-deep mx-auto size-8" />
-                      <p className="mt-3 text-ui-lg font-bold text-foreground">{selectedFile.name}</p>
-                      <p className="mt-1 font-mono text-meta text-ink-subtle">
-                        {(selectedFile.size / 1024).toFixed(0)} KB · tap to change
-                      </p>
+                      <Loader2 className="size-4 animate-spin" />
+                      Adding it…
                     </>
                   ) : (
-                    <>
-                      <Upload className="mx-auto size-8 text-ink-subtle" />
-                      <p className="mt-3 text-ui-lg font-bold text-foreground">Drop a file here</p>
-                      <p className="mt-1 text-ui text-muted-foreground">
-                        or tap to browse · PDF, DOCX, TXT, MD · up to {MAX_FILE_MB}MB
-                      </p>
-                    </>
+                    "Add to my library"
                   )}
                 </button>
+
+                {error && <Notice>{error}</Notice>}
+
+                {result && (() => {
+                  const s = STATUS[currentStatus] ?? { tone: "info" as const, label: currentStatus }
+                  const live = currentStatus === "running" || currentStatus === "queued"
+                  return (
+                    <Notice tone={s.tone}>
+                      <span className="font-bold">{s.label}</span>
+                      {live && <span className="working-bar mt-2 block" />}
+                      {currentStatus === "completed" && (
+                        <span className="mt-1 block font-normal">Head back to Ask and question it.</span>
+                      )}
+                      {(result.taskId ?? result.documentId) && (
+                        <span className="mt-1 block break-all font-mono text-[11px] opacity-75">
+                          {result.taskId ? `task ${result.taskId}` : `doc ${result.documentId}`}
+                        </span>
+                      )}
+                    </Notice>
+                  )
+                })()}
               </div>
-            )}
-
-            {tab === "url" && (
-              <TextField
-                label="Link to the document"
-                value={urlSource}
-                onChange={e => setUrlSource(e.target.value)}
-                placeholder="https://arxiv.org/pdf/2005.11401"
-                disabled={loading}
-              />
-            )}
-
-            <TextField
-              label="What should it be called?"
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              placeholder="Attention Is All You Need"
-              disabled={loading}
-              hint="This is the name you will see beside every citation from it."
-            />
-
-            <div className="space-y-2">
-              <label htmlFor="ingest-domain" className="block text-ui font-bold text-foreground">
-                Domain
-              </label>
-              <DomainSelect
-                id="ingest-domain"
-                value={domain}
-                onChange={setDomain}
-                disabled={loading}
-                className="h-12 w-full rounded-lg"
-              />
             </div>
 
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={loading || !canSubmit}
-              className="btn-primary w-full"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Adding it…
-                </>
-              ) : (
-                "Add to my library"
-              )}
-            </button>
-
-            {error && <Notice>{error}</Notice>}
-
-            {result && (() => {
-              const s = STATUS[currentStatus] ?? { tone: "info" as const, label: currentStatus }
-              // Still working states get the same indeterminate bar the query
-              // wait uses, so "something is running" looks the same everywhere in
-              // the app rather than once per screen.
-              const live = currentStatus === "running" || currentStatus === "queued"
-              return (
-                <Notice tone={s.tone}>
-                  <span className="font-bold">{s.label}</span>
-                  {live && <span className="working-bar mt-2 block" />}
-                  {currentStatus === "completed" && (
-                    <span className="mt-1 block font-normal">Head back to Ask and question it.</span>
-                  )}
-                  {(result.taskId ?? result.documentId) && (
-                    <span className="mt-1 block font-mono text-meta break-all opacity-75">
-                      {result.taskId ? `task ${result.taskId}` : `doc ${result.documentId}`}
+            <div className="space-y-4 lg:sticky lg:top-6">
+              <div className="rounded-2xl border border-border bg-card p-5">
+                <p className="label-meta">What happens next</p>
+                <ol className="mt-3 space-y-3">
+                  <li className="flex gap-3">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-soft font-mono text-[11px] font-bold text-brand-deep">
+                      1
                     </span>
-                  )}
-                </Notice>
-              )
-            })()}
+                    <span className="text-[13px] leading-5 text-muted-foreground">
+                      <span className="font-semibold text-foreground">Parsed & chunked</span> — text extracted,
+                      cleaned, and split into passages.
+                    </span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-soft font-mono text-[11px] font-bold text-brand-deep">
+                      2
+                    </span>
+                    <span className="text-[13px] leading-5 text-muted-foreground">
+                      <span className="font-semibold text-foreground">Embedded & indexed</span> — ready for dense
+                      + sparse search.
+                    </span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-soft font-mono text-[11px] font-bold text-brand-deep">
+                      3
+                    </span>
+                    <span className="text-[13px] leading-5 text-muted-foreground">
+                      <span className="font-semibold text-foreground">Cited answers</span> — ask and every claim
+                      points to its page.
+                    </span>
+                  </li>
+                </ol>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-list p-4 text-[13px] leading-5 text-muted-foreground">
+                Tip: give the document the exact title you want to see in citations. It is what appears beside
+                every [n] marker.
+              </div>
+            </div>
           </div>
         </div>
       </main>

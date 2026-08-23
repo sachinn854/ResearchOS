@@ -40,7 +40,7 @@ export function TopBar({
   const { user, logout } = useAuth()
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4 sm:px-6">
+    <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b border-border/70 bg-canvas/80 px-4 backdrop-blur-[14px] sm:px-6">
       <Link href="/" className="flex items-center gap-2.5" aria-label="ResearchOS home">
         <BrandMark size="md" />
         <span className="font-display hidden text-title-sm text-foreground sm:block">ResearchOS</span>
@@ -49,29 +49,43 @@ export function TopBar({
       <div className="mx-3 hidden h-5 w-px bg-border sm:block" />
 
       {onOpenHistory && (
-        <button type="button" onClick={onOpenHistory} className="btn-quiet gap-2 px-2.5">
-          <Clock className="size-4" />
+        <button
+          type="button"
+          onClick={onOpenHistory}
+          className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-[13px] font-semibold text-muted-foreground shadow-lift transition-colors hover:border-border-strong hover:text-foreground"
+        >
+          <Clock className="size-3.5" />
           <span className="hidden sm:inline">Recent</span>
-          {historyCount ? (
-            <span className="font-mono text-meta text-ink-subtle">{historyCount}</span>
-          ) : null}
+          {typeof historyCount === "number" && (
+            <span className="rounded-full bg-list px-1.5 py-0.5 font-mono text-[11px] leading-none text-ink-subtle">
+              {historyCount}
+            </span>
+          )}
         </button>
       )}
 
       <Link
         href="/ingest"
         aria-current={active === "ingest" ? "page" : undefined}
-        className={cn("btn-quiet gap-2 px-2.5", active === "ingest" && "text-foreground")}
+        className={cn(
+          "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[13px] font-semibold transition-colors",
+          active === "ingest"
+            ? "border-brand-edge bg-brand-soft text-brand-deep"
+            : "border-border bg-card text-muted-foreground hover:border-border-strong hover:text-foreground",
+        )}
       >
-        <FileUp className="size-4" />
+        <FileUp className="size-3.5" />
         <span className="hidden sm:inline">Add a document</span>
       </Link>
 
       <div className="ml-auto flex items-center gap-2">
         {domain !== undefined && onDomainChange && (
-          <>
-            {/* The label is visually hidden rather than dropped: the control says
-                "All domains", which reads as a state, not as the thing it scopes. */}
+          // Hidden below sm: at phone widths this plus the history pill, the
+          // ingest link, the theme toggle and the account controls do not fit
+          // in one 14-height row. Scoping to a domain is a refinement on top
+          // of asking, not a control the first render of a phone screen must
+          // carry — it reappears the moment there is room for it.
+          <div className="hidden items-center sm:flex">
             <label htmlFor="thread-domain" className="sr-only">
               Scope the question to a domain
             </label>
@@ -80,27 +94,30 @@ export function TopBar({
               value={domain}
               onChange={onDomainChange}
               includeAll
-              className="h-9 w-auto min-w-36 rounded-lg"
+              className="h-9 w-auto min-w-36 rounded-full border-border bg-card px-3.5"
             />
-          </>
+          </div>
         )}
 
-        <ThemeToggle className="size-9" />
+        <ThemeToggle className="size-9 rounded-full border border-border bg-card" />
 
         {user && (
           <>
             <span
               title={`${user.name} · ${user.email}`}
-              className="bg-brand-soft text-brand-deep grid size-9 shrink-0 place-items-center rounded-lg text-ui font-bold"
+              className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-[13px] font-bold text-primary-foreground"
             >
               {user.name.charAt(0).toUpperCase()}
             </span>
             <button
               type="button"
-              onClick={() => { logout(); window.location.href = "/login" }}
+              onClick={() => {
+                logout()
+                window.location.href = "/login"
+              }}
               aria-label="Sign out"
               title="Sign out"
-              className="btn-quiet size-9 p-0"
+              className="grid size-9 place-items-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
             >
               <LogOut className="size-4" />
             </button>

@@ -37,103 +37,84 @@
    brown one.
    =========================================================================== */
 
+/* Vellum (light, default): soft neutral desktop + deep teal primary. Dark below
+   is a full second pass, not a filter over these values. */
 :root, .light {
-  /* Four warm neutral steps, not two. Depth in the neutrals is what a palette
-     with one accent has instead of a second accent, and the previous set had the
-     page and the raised surfaces almost the same value — so nothing read as
-     lifted off anything. */
-  --canvas: #f4f1ea;         /* the page */
-  --card: #fcfaf6;           /* lifted: the evidence rail, the history panel */
-  --list: #e9e4d9;           /* recessed: quoted passages, the composer */
-  --popover: #fcfaf6;
-  --secondary: #e9e4d9;
-  --muted: #efebe2;
-  --surface-raised: #e9e4d9;
-  --accent: #e3ddd0;         /* shadcn semantics: hover surface, NOT the brand */
+  --canvas: #ecebed;            /* outer desktop gray */
+  --card: #ffffff;              /* main panels */
+  --list: #f5f5f7;              /* bubble bg, subtle surface */
+  --popover: #ffffff;
+  --secondary: #f5f5f7;
+  --muted: #f0eff4;
+  --surface-raised: #f5f5f7;
+  --accent: #efeff5;
 
-  --foreground: #241d18;         /* 12.68:1 on the worst tinted surface */
-  --card-foreground: #241d18;
-  --popover-foreground: #241d18;
-  --secondary-foreground: #382e27;
-  --accent-foreground: #241d18;
-  --muted-foreground: #665950;   /* 5.15:1 */
-  --ink-subtle: #6e6158;         /* 4.56:1 — the dimmest ink allowed anywhere */
+  --foreground: #1a1a1f;
+  --card-foreground: #1a1a1f;
+  --popover-foreground: #1a1a1f;
+  --secondary-foreground: #2a2a33;
+  --accent-foreground: #1a1a1f;
+  --muted-foreground: #6b6b7a;
+  --ink-subtle: #8a8a99;
 
-  /* One accent, and it is ink rather than a colour: deep enough to set text in
-     (7.76:1 at worst) as well as fill a shape, which is what lets citation
-     markers, links and buttons all be the same thing. */
-  --primary: #28436c;
-  --primary-foreground: #f7f3ec;  /* 9.00:1 on the fill */
-  --brand-deep: #28436c;
-  --brand-soft: rgba(40, 67, 108, 0.08);
-  --brand-edge: rgba(40, 67, 108, 0.24);
+  --primary: #0f766e;           /* deep teal */
+  --primary-foreground: #ffffff;
+  --brand-deep: #0f766e;
+  --brand-soft: rgba(15, 118, 110, 0.08);
+  --brand-edge: rgba(15, 118, 110, 0.18);
 
-  --destructive: #a83527;        /* 5.00:1 on its own 10% wash */
-  --destructive-foreground: #fcfaf6;
-  --success: #486825;            /* 4.95:1 */
-  --warning: #85560c;            /* 4.87:1 */
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
+  --success: #30a46c;
+  --warning: #e4a100;
 
-  --border: #e2dbcd;
-  --border-strong: #cec5b4;
-  --input: #e2dbcd;
-  --ring: rgba(40, 67, 108, 0.45);
+  --border: #ecebf0;
+  --border-strong: #dddce6;
+  --input: #ecebf0;
+  --ring: rgba(15, 118, 110, 0.35);
 
-  --elevation-column: 0 1px 2px rgba(36, 29, 24, 0.04), 0 12px 32px -16px rgba(36, 29, 24, 0.16);
-  --elevation-lift: 0 1px 2px rgba(36, 29, 24, 0.05), 0 4px 14px -6px rgba(36, 29, 24, 0.12);
+  --elevation-column: 0 1px 3px rgba(0,0,0,0.06), 0 8px 24px -12px rgba(0,0,0,0.08);
+  --elevation-lift: 0 1px 2px rgba(0,0,0,0.06), 0 4px 12px -4px rgba(0,0,0,0.08);
 
-  /* Tightened from 14px. A generous radius reads as friendly, which is the note
-     a consumer app wants; at 10px the corners are still soft but the shapes stay
-     precise, and precision is the note here. */
-  --radius: 0.625rem;
+  --radius: 0.875rem;
 }
 
 .dark {
-  /* Built in OKLCH, not picked as hex. The previous set carried a chroma of
-     0.013–0.023 at these lightnesses, which at near-black does not read as
-     "warm" — it reads as brown, and brown surfaces under a cool blue accent look
-     like two themes fighting. These sit at 0.005–0.007: enough warmth to belong
-     with the cream light theme, not enough to be a colour.
+  --canvas: #0e0e10;            /* desktop */
+  --list: #1a1a1f;
+  --card: #1e1e22;              /* panels, bubbles */
+  --popover: #24242a;
+  --secondary: #1a1a1f;
+  --muted: #17171b;
+  --surface-raised: #25252c;
+  --accent: #24242a;
 
-     The steps are spaced by perceptual lightness rather than by eye. Below about
-     0.03 apart, two dark surfaces are simply the same surface. */
-  --canvas: #171513;         /* the page */
-  --list: #201e1c;           /* recessed: quoted passages, the composer */
-  --card: #292624;           /* lifted: the evidence rail, the history panel */
-  --popover: #34312e;
-  --secondary: #201e1c;
-  --muted: #1b1917;
-  --surface-raised: #34312e;
-  --accent: #34312e;
+  --foreground: #f5f5f7;
+  --card-foreground: #f5f5f7;
+  --popover-foreground: #f5f5f7;
+  --secondary-foreground: #d4d4dc;
+  --accent-foreground: #f5f5f7;
+  --muted-foreground: #9a9aac;
+  --ink-subtle: #8a8a9c;
 
-  --foreground: #f0ede8;         /* 10.27:1 on the worst tinted surface */
-  --card-foreground: #f0ede8;
-  --popover-foreground: #f0ede8;
-  --secondary-foreground: #d5d0c9;
-  --accent-foreground: #f0ede8;
-  --muted-foreground: #b8b3ac;   /* 5.76:1 */
-  --ink-subtle: #a39e97;         /* 4.51:1 */
+  --primary: #2dd4bf;           /* lifted teal for dark */
+  --primary-foreground: #0e0e10;
+  --brand-deep: #5eead4;
+  --brand-soft: rgba(45, 212, 191, 0.14);
+  --brand-edge: rgba(45, 212, 191, 0.28);
 
-  /* The light theme's accent, lifted to read on a dark ground: same hue to
-     within half a degree, so the two themes are one colour at two lightnesses
-     rather than two different blues. */
-  --primary: #87acea;
-  --primary-foreground: #122036;  /* 7.09:1 on the fill */
-  --brand-deep: #87acea;          /* 5.24:1 at worst */
-  --brand-soft: rgba(135, 172, 234, 0.12);
-  --brand-edge: rgba(135, 172, 234, 0.28);
+  --destructive: #ff6369;
+  --destructive-foreground: #1a1a1f;
+  --success: #4cc38a;
+  --warning: #ffbf47;
 
-  --destructive: #ed7871;        /* 4.63:1 on its own 10% wash */
-  --destructive-foreground: #201e1c;
-  --success: #96da87;            /* 7.24:1 */
-  --warning: #eab55d;            /* 6.54:1 */
+  --border: #2a2a30;
+  --border-strong: #383840;
+  --input: #2a2a30;
+  --ring: rgba(45, 212, 191, 0.45);
 
-  --border: #383532;
-  --border-strong: #4c4844;
-  --input: #383532;
-  --ring: rgba(135, 172, 234, 0.5);
-
-  --elevation-column: 0 1px 2px rgba(0, 0, 0, 0.45), 0 16px 40px -20px rgba(0, 0, 0, 0.75);
-  --elevation-lift: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --elevation-column: 0 1px 3px rgba(0,0,0,0.4), 0 16px 40px -20px rgba(0,0,0,0.6);
+  --elevation-lift: 0 1px 2px rgba(0,0,0,0.4), 0 8px 24px -12px rgba(0,0,0,0.5);
 }
 
 @theme inline {
@@ -540,6 +521,27 @@
 }
 .animate-emoji-pop { animation: emoji-pop 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 
+/* Landing page only: a section settles in as it crosses into view, once,
+   rather than all firing at page load — the load itself is the hero's job.
+   Starts a hair below and slightly scaled, same easing family as the rest of
+   the app's motion so it reads as one system, not a marketing-site bolt-on. */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 560ms cubic-bezier(0.16, 1, 0.3, 1), transform 560ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+.reveal.is-visible { opacity: 1; transform: none; }
+
+/* A slow ambient breathing on the hero's corner glow — the one place in the
+   redesign that is allowed to move without a reason tied to state, because it
+   is background atmosphere, not information. */
+@keyframes ambient-drift {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 0.85; transform: scale(1.08); }
+}
+.animate-ambient-drift { animation: ambient-drift 7s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   .animate-exchange-in,
   .animate-emoji-pop,
@@ -548,6 +550,12 @@
      does — so with motion off it becomes a static rule rather than a full track
      that would read as "complete". */
   .working-bar::after { animation: none; width: 30%; }
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .animate-ambient-drift { animation: none; }
 }
 
 /* Only while the theme toggle is mid-swap; left on it would lag every hover. */

@@ -5,6 +5,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import rubricon  # [rubricon field test] temporary
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, HTTPException
 from fastapi.responses import StreamingResponse
@@ -531,48 +532,64 @@ async def query(
     if request.session_id:
         conversation_history = await load_history(request.session_id, db, user_id=current_user.id)
 
-    result = await graph.ainvoke({
-        "query": request.query,
-        "domain": request.domain,
-        "db": db,
-        "session_id": request.session_id,
-        "conversation_history": conversation_history,
-        "plan": {},
-        "sub_queries": [],
-        "chunks": [],
-        "contradictions": [],
-        "context": "",
-        "answer": "",
-        "is_relevant": True,
-        "has_hallucination": False,
-        "citation_verified": True,
-        "web_search_used": False,
-        "web_sources": [],
-        "sources": [],
-    })
+    # [rubricon field test] Temporary — remove with the block in main.py.
+    with rubricon.record(question=request.query) as run:
+        result = await graph.ainvoke({
+            "query": request.query,
+            "domain": request.domain,
+            "db": db,
+            "session_id": request.session_id,
+            "conversation_history": conversation_history,
+            "plan": {},
+            "sub_queries": [],
+            "chunks": [],
+            "contradictions": [],
+            "context": "",
+            "answer": "",
+            "is_relevant": True,
+            "has_hallucination": False,
+            "citation_verified": True,
+            "web_search_used": False,
+            "web_sources": [],
+            "sources": [],
+        })
 
-    if not result["is_relevant"]:
+        # [rubricon field test] Recorded from the graph's final state, not at the retrieval
+        # call. The retriever runs inside a LangGraph node that this route cannot reach, so
+        # the documented "mark it where it happens" shape does not apply here. Consequences:
+        # the retrieval span carries no duration, and a request that dies before the graph
+        # returns records no retrieval at all even though retrieval succeeded.
+        rubricon.record_retrieval(request.query, result.get("chunks") or [])
+
+        if not result["is_relevant"]:
+            return QueryResponse(
+                answer="No relevant information found in the knowledge base for your query.",
+                chunks_used=0,
+                sources=[],
+            )
+
+        answer = result["answer"]
+        if result["has_hallucination"]:
+            answer += "\n\n[Warning: This answer may contain information not fully supported by the retrieved context.]"
+
+        # [rubricon field test] model and output only. The generator node calls the provider
+        # SDK inside the graph and does not put token usage on AgentState, so there is nothing
+        # to pass as usage= from here — which means cost and token scorers cannot run on this
+        # route without threading usage through the graph state first.
+        rubricon.record_llm(model=settings.llm_model, output=answer)
+        run.answer = answer
+
+        if request.session_id:
+            await save_exchange(
+                session_id=request.session_id,
+                query=request.query,
+                answer=answer,
+                db=db,
+                user_id=current_user.id,
+            )
+
         return QueryResponse(
-            answer="No relevant information found in the knowledge base for your query.",
-            chunks_used=0,
-            sources=[],
-        )
-
-    answer = result["answer"]
-    if result["has_hallucination"]:
-        answer += "\n\n[Warning: This answer may contain information not fully supported by the retrieved context.]"
-
-    if request.session_id:
-        await save_exchange(
-            session_id=request.session_id,
-            query=request.query,
             answer=answer,
-            db=db,
-            user_id=current_user.id,
+            chunks_used=len(result["chunks"]),
+            sources=[SourceItem(**s) for s in result["sources"]],
         )
-
-    return QueryResponse(
-        answer=answer,
-        chunks_used=len(result["chunks"]),
-        sources=[SourceItem(**s) for s in result["sources"]],
-    )
