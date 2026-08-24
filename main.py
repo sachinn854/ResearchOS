@@ -44,17 +44,6 @@ LOGGING_CONFIG = {
 logging.config.dictConfig(LOGGING_CONFIG)
 log = logging.getLogger("researchos.app")
 
-# [rubricon field test] Temporary — remove with the block in backend/api/routes/research.py.
-# Recording has to be switched on before any request is handled, and it is process-wide, so
-# module scope here is the only place that is both. instrument() returns the integrations it
-# attached to; it also turns recording on when it attaches to nothing, which is what the
-# manual record_retrieval/record_llm calls in the query route depend on.
-import rubricon  # noqa: E402
-
-_rubricon_attached = rubricon.instrument(path="traces.jsonl")
-log.info("[rubricon] attached=%s", _rubricon_attached)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("ResearchOS starting up...")
