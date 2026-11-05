@@ -38,7 +38,7 @@ services:
       - key: QDRANT_COLLECTION
         value: researchos_chunks
       - key: CORS_ORIGINS
-        value: https://researchos-frontend.onrender.com
+        value: https://researchos-frontend-12i4.onrender.com
       - key: APP_ENV
         value: production
       - key: JWT_SECRET_KEY
@@ -54,7 +54,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_API_URL
-        value: https://researchos-backend.onrender.com
+        value: https://researchos-backend-5p2m.onrender.com
 
   - type: worker
     name: researchos-celery
