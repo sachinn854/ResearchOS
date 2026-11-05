@@ -62,7 +62,7 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     plan: free
-    startCommand: celery -A backend.workers.celery_app worker --loglevel=info -P solo -Q ingest,background
+    dockerCommand: celery -A backend.workers.celery_app worker --loglevel=info -P solo -Q ingest,background
     envVars:
       - key: POSTGRES_URL
         sync: false
