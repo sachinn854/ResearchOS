@@ -101,7 +101,9 @@ async def ingest_document(
     # Step 2: Clean pages (remove noise before chunking)
     log.info("[pipeline] step 2/8 — cleaning %d pages...", len(pages))
     for page in pages:
-        page.text = clean_page_text(page.text)
+        # Postgres TEXT cannot store null byte \x00 — strip it early so a single
+        # PDF with binary artefacts does not poison the whole ingest session
+        page.text = clean_page_text(page.text.replace("\x00", ""))
     pages = [p for p in pages if p.text.strip()]
     log.info("[pipeline] %d pages remain after cleaning", len(pages))
 
