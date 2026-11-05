@@ -42,7 +42,8 @@ qdrant-client
 # -------------------------------------------------------------
 # Relational Database
 # -------------------------------------------------------------
-sqlalchemy
+sqlalchemy[asyncio]
+greenlet
 asyncpg
 psycopg2-binary
 alembic
