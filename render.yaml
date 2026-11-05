@@ -1,9 +1,12 @@
-databases:
-  - name: researchos-redis
-    plan: free
-    type: redis
-
 services:
+  - type: keyvalue
+    name: researchos-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList:
+      - source: 0.0.0.0/0
+        description: everywhere
+
   - type: web
     name: researchos-backend
     runtime: docker
@@ -16,8 +19,9 @@ services:
       - key: POSTGRES_SCHEMA
         value: researchos
       - key: REDIS_URL
-        fromDatabase:
+        fromService:
           name: researchos-redis
+          type: keyvalue
           property: connectionString
       - key: OPENROUTER_API_KEY
         sync: false
@@ -37,9 +41,6 @@ services:
         value: https://researchos-frontend.onrender.com
       - key: APP_ENV
         value: production
-      # WEB SERVICE — signs the JWTs. generateValue lets Render create a strong random value on
-      # first deploy so it is never in this file or in git. Rotating it signs
-      # every user out, which is the intended behaviour for a leaked key.
       - key: JWT_SECRET_KEY
         generateValue: true
 
@@ -49,11 +50,11 @@ services:
     dockerfilePath: ./frontend/Dockerfile
     dockerContext: ./frontend
     plan: free
-    dockerBuildArgs:
-      - NEXT_PUBLIC_API_URL=https://researchos-backend.onrender.com
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NEXT_PUBLIC_API_URL
+        value: https://researchos-backend.onrender.com
 
   - type: worker
     name: researchos-celery
@@ -61,17 +62,6 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     plan: free
-    # -Q lists the queues this worker consumes. Naming both is important: a worker
-    # started without -Q takes the default queue only, so `background` tasks would
-    # queue up and never run.
-    #
-    # Locally (docker-compose.yml) we run one worker per queue, which fully
-    # isolates them. Render's free plan only allows so many services, so here a
-    # single worker consumes both. That still helps: Celery rotates between the
-    # listed queues, so a user's upload waits behind roughly one background job
-    # instead of all five that a web-search fallback can enqueue at once. To get
-    # full isolation on a paid plan, duplicate this service and give one `-Q
-    # ingest` and the other `-Q background`.
     startCommand: celery -A backend.workers.celery_app worker --loglevel=info -P solo -Q ingest,background
     envVars:
       - key: POSTGRES_URL
@@ -79,8 +69,9 @@ services:
       - key: POSTGRES_SCHEMA
         value: researchos
       - key: REDIS_URL
-        fromDatabase:
+        fromService:
           name: researchos-redis
+          type: keyvalue
           property: connectionString
       - key: OPENROUTER_API_KEY
         sync: false
@@ -92,9 +83,5 @@ services:
         value: researchos_chunks
       - key: APP_ENV
         value: production
-      # WORKER — never issues or verifies a token, but backend/core/config.py
-      # validates every setting at import time, so it needs *a* value to boot.
-      # Intentionally not the web service's secret: this process has no reason to
-      # be able to mint tokens.
       - key: JWT_SECRET_KEY
         generateValue: true
