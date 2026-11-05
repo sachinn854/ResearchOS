@@ -1,9 +1,4 @@
 databases:
-  - name: researchos-db
-    plan: free
-    databaseName: researchos
-    user: postgres
-
   - name: researchos-redis
     plan: free
     type: redis
@@ -17,9 +12,9 @@ services:
     plan: free
     envVars:
       - key: POSTGRES_URL
-        fromDatabase:
-          name: researchos-db
-          property: connectionString
+        sync: false
+      - key: POSTGRES_SCHEMA
+        value: researchos
       - key: REDIS_URL
         fromDatabase:
           name: researchos-redis
@@ -29,15 +24,17 @@ services:
       - key: LLM_MODEL
         value: openai/gpt-oss-120b
       - key: FAST_LLM_MODEL
-        value: openai/gpt-oss-20b:free
-      - key: LLM_PROVIDER
-        value: Weights & Biases
+        value: openai/gpt-oss-20b
       - key: TAVILY_API_KEY
         sync: false
       - key: QDRANT_URL
         sync: false
+      - key: QDRANT_API_KEY
+        sync: false
       - key: QDRANT_COLLECTION
         value: researchos_chunks
+      - key: CORS_ORIGINS
+        value: https://researchos-frontend.onrender.com
       - key: APP_ENV
         value: production
       # WEB SERVICE — signs the JWTs. generateValue lets Render create a strong random value on
@@ -78,9 +75,9 @@ services:
     startCommand: celery -A backend.workers.celery_app worker --loglevel=info -P solo -Q ingest,background
     envVars:
       - key: POSTGRES_URL
-        fromDatabase:
-          name: researchos-db
-          property: connectionString
+        sync: false
+      - key: POSTGRES_SCHEMA
+        value: researchos
       - key: REDIS_URL
         fromDatabase:
           name: researchos-redis
@@ -88,6 +85,8 @@ services:
       - key: OPENROUTER_API_KEY
         sync: false
       - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
         sync: false
       - key: QDRANT_COLLECTION
         value: researchos_chunks
