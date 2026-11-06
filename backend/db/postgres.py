@@ -4,19 +4,27 @@ from backend.core.config import settings
 
 
 def _connect_args() -> dict:
-    """Pin every connection's search_path when a non-default schema is configured.
+    """Build asyncpg connect args for Neon / pooler compatibility.
 
-    All our SQL — ORM and raw text() alike — uses unqualified table names, so
-    search_path is what decides which schema they land in.
-
-    Note that `public` is deliberately NOT included as a fallback. If it were, a
-    table missing from our schema would silently resolve to a same-named table in
-    public — which, on a database shared with another app, means quietly reading
-    or writing someone else's `documents` or `users`. Better to fail loudly.
+    - Remote hosts (not localhost) → ssl=require, otherwise Render/Neon will reset
+      the connection and logs show "Connect call failed (::1, 5432)" / "connection is closed".
+    - Poolers (pooler. / -pooler. hosts, e.g. Neon/Supabase) → prepared_statement_cache_size=0
+      because pgbouncer/pooler does not support prepared statements and asyncpg would 400.
+    - Shared schema → search_path pinned to researchos (see _connect_args doc above).
     """
-    if settings.postgres_schema == "public":
-        return {}
-    return {"server_settings": {"search_path": settings.postgres_schema}}
+    args: dict = {}
+    url = settings.postgres_url
+    is_remote = not any(h in url for h in ("localhost", "127.0.0.1"))
+    is_pooler = any(k in url for k in ("pooler.", "-pooler."))
+
+    if is_remote:
+        args["ssl"] = "require"
+    if is_pooler:
+        args["prepared_statement_cache_size"] = 0
+
+    if settings.postgres_schema != "public":
+        args["server_settings"] = {"search_path": settings.postgres_schema}
+    return args
 
 
 engine = create_async_engine(

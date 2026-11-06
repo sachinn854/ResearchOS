@@ -178,6 +178,7 @@ def generator_node(state: AgentState) -> dict:
         model=settings.llm_model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
+        max_tokens=4096,
     )
 
     answer = response.choices[0].message.content

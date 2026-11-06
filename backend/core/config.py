@@ -21,7 +21,7 @@ class Settings(BaseSettings):
         description="Main generation model — OpenRouter model ID. Override with LLM_MODEL in .env"
     )
     fast_llm_model: str = Field(
-        default="openai/gpt-oss-20b:free",
+        default="openai/gpt-oss-20b",
         description="Smaller/faster model for domain check, HyDE, entity extraction — set FAST_LLM_MODEL in .env"
     )
     llm_provider: str | None = Field(

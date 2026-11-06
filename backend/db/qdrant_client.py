@@ -12,7 +12,12 @@ client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key, 
 
 
 def init_collection():
-    """Create the Qdrant collection on startup if it does not already exist."""
+    """Create the Qdrant collection on startup if it does not already exist.
+
+    Also ensures keyword indexes exist for filtered fields (domain, entities,
+    document_id) so filtered queries don't 400 with "Index required but not
+    found". Ref: Chatbot backend/rag/store.py _ensure_payload_indexes.
+    """
     existing = [c.name for c in client.get_collections().collections]
 
     if settings.qdrant_collection not in existing:
@@ -24,5 +29,21 @@ def init_collection():
             ),
         )
         print(f"Created collection: {settings.qdrant_collection}")
+        _ensure_payload_indexes()
     else:
         print(f"Collection already exists: {settings.qdrant_collection}")
+        _ensure_payload_indexes()
+
+
+def _ensure_payload_indexes() -> None:
+    """Create keyword indexes for filtered fields (idempotent)."""
+    for field in ("domain", "document_id", "entities"):
+        try:
+            client.create_payload_index(
+                collection_name=settings.qdrant_collection,
+                field_name=field,
+                field_schema="keyword",
+            )
+            print(f"Created keyword index: {field}")
+        except Exception:
+            pass  # already exists
