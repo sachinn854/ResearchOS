@@ -31,7 +31,7 @@ def generate_hypothetical_document(query: str) -> str:
     # costs recall on that one call; raising costs the entire answer.
     content = response.choices[0].message.content
     if not content or not content.strip():
-        log.warning("[hyde] model returned no content — falling back to the raw query")
+        log.warning("[hyde] model returned no content  - falling back to the raw query")
         return query
 
     hyp_doc = content.strip()
