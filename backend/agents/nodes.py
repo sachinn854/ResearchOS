@@ -1,6 +1,8 @@
+import asyncio
 import json
 import logging
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger("researchos.agent")
 
@@ -9,11 +11,15 @@ from backend.core.config import settings
 from backend.core.llm import llm as _llm, provider_kwargs
 from backend.prompts.report import build_report_prompt
 from backend.retrieval.context_assembler import ContextAssembler
+from backend.retrieval.graph_expander import retrieve_by_entities
+from backend.retrieval.hyde import generate_hypothetical_document
 from backend.retrieval.hybrid_retriever import HybridRetriever
 from backend.retrieval.web_searcher import search_web
 
 _retriever = HybridRetriever()
+_subq_retriever = HybridRetriever(use_hyde=False, use_graph=False)
 _assembler = ContextAssembler()
+_thread_pool = ThreadPoolExecutor(max_workers=4)
 
 # Langfuse tracing — enabled only when keys are configured
 _langfuse = None
@@ -36,14 +42,37 @@ async def retriever_node(state: AgentState) -> dict:
     sub-query and merges results before returning.
     """
     sub_queries = state.get("sub_queries") or []
+    loop = asyncio.get_running_loop()
 
     if sub_queries:
         log.info("[retriever] running retrieval for %d sub-queries...", len(sub_queries))
         seen_keys: set[str] = set()
         merged: list = []
 
+        # Run HyDE and Graph ONCE on original query to avoid calling per sub-query
+        try:
+            if _retriever.use_hyde:
+                await loop.run_in_executor(_thread_pool, generate_hypothetical_document, state["query"])
+        except Exception as exc:
+            log.warning("[retriever] hyde pre-run failed: %s", exc)
+
+        try:
+            if _retriever.use_graph:
+                graph_once = await loop.run_in_executor(
+                    _thread_pool, retrieve_by_entities, state["query"], 10, state["domain"]
+                )
+                for c in graph_once:
+                    key = f"{c.document_id}_{c.chunk_index}"
+                    if key not in seen_keys:
+                        seen_keys.add(key)
+                        merged.append(c)
+                log.info("[retriever] added %d chunks from graph (once)", len(graph_once))
+        except Exception as exc:
+            log.warning("[retriever] graph pre-run failed: %s", exc)
+
+        # Run each sub-query with hyde+graph disabled
         for sq in sub_queries:
-            sq_chunks, _ = await _retriever.retrieve(
+            sq_chunks, _ = await _subq_retriever.retrieve(
                 sq, db=state["db"], top_k=5, domain=state["domain"]
             )
             for c in sq_chunks:
